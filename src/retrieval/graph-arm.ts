@@ -90,6 +90,16 @@ export class InMemoryLinkSource implements LinkSource {
 export interface GraphArmOptions {
   /** How many of the seed arm's results to expand from. */
   readonly seedLimit?: number;
+  /**
+   * Maximum neighbours returned.
+   *
+   * Expansion is additive recall, and unbounded it becomes displacement:
+   * measured on single-target queries, an uncapped arm dropped recall@10 from
+   * 0.800 to 0.550 by flooding the fused set with neighbours that were not the
+   * answer. The circular corpus could not show this, because there the
+   * neighbours *were* the answer.
+   */
+  readonly maxNeighbours?: number;
   /** Hops to walk. One is almost always right; two explodes and dilutes. */
   readonly depth?: number;
   /** Restrict to these link types. Absent means all. */
@@ -97,7 +107,7 @@ export interface GraphArmOptions {
   readonly name?: string;
 }
 
-const DEFAULTS = { seedLimit: 5, depth: 1 } as const;
+const DEFAULTS = { seedLimit: 5, depth: 1, maxNeighbours: 6 } as const;
 
 /**
  * Order neighbours of the same seed by link type.
@@ -133,6 +143,7 @@ export class GraphExpansionArm implements RetrievalArm {
   async search(query: RetrievalQuery, viewer: Viewer): Promise<RetrievalHit[]> {
     const seedLimit = this.options.seedLimit ?? DEFAULTS.seedLimit;
     const depth = this.options.depth ?? DEFAULTS.depth;
+    const maxNeighbours = this.options.maxNeighbours ?? DEFAULTS.maxNeighbours;
 
     const seeds = (await this.seedArm.search(query, viewer)).slice(
       0,
@@ -201,6 +212,10 @@ export class GraphExpansionArm implements RetrievalArm {
 
     // The ACL check happens here, on resolution — a link is reachability, never
     // permission.
-    return this.resolver.resolve(discovered, viewer, query);
+    return this.resolver.resolve(
+      discovered.slice(0, maxNeighbours),
+      viewer,
+      query,
+    );
   }
 }
