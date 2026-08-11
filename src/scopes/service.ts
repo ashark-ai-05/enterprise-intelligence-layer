@@ -182,6 +182,20 @@ export async function removeScope(
     );
     if (!exists.rows[0]) throw new Error(`unknown scope: ${scopeId}`);
 
+    // Capture the resources this scope is about to orphan, before the
+    // resource_scopes rows disappear. A purge must be bounded to these: any
+    // resource already orphaned by an earlier `retain` removal was retained
+    // deliberately, and removing an unrelated scope must not destroy it.
+    const orphanedByThisRemoval = await tx.query<{ resource_id: string }>(
+      `SELECT rs.resource_id FROM resource_scopes rs
+        WHERE rs.scope_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM resource_scopes other
+            WHERE other.resource_id = rs.resource_id AND other.scope_id <> $1
+          )`,
+      [scopeId],
+    );
+
     if (disposition === "retain") {
       await tx.query(
         `UPDATE resources SET orphaned_at = now()
@@ -202,9 +216,15 @@ export async function removeScope(
       [scopeId, tenantId],
     );
 
-    if (disposition === "purge") {
+    if (disposition === "purge" && orphanedByThisRemoval.rows.length > 0) {
       await tx.query(
-        "DELETE FROM resources WHERE NOT EXISTS (SELECT 1 FROM resource_scopes rs WHERE rs.resource_id = resources.id)",
+        `DELETE FROM resources
+          WHERE id = ANY($1::uuid[])
+            AND tenant_id = $2
+            AND NOT EXISTS (
+              SELECT 1 FROM resource_scopes rs WHERE rs.resource_id = resources.id
+            )`,
+        [orphanedByThisRemoval.rows.map((row) => row.resource_id), tenantId],
       );
     }
   });
