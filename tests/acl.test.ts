@@ -110,6 +110,20 @@ describe("identity and ACL plane", () => {
     ).toHaveLength(1);
   });
 
+  it("pushes a source-object id filter through the same authorized read", async () => {
+    await replaceContainerAces(db, "acme", containerId, [
+      { ...engineering, effect: "allow" },
+    ]);
+    expect(
+      await listAuthorizedChunks(db, "acme", [engineering], [], undefined, [
+        "page-1",
+      ]),
+    ).toHaveLength(1);
+    expect(
+      await listAuthorizedChunks(db, "acme", [engineering], [], undefined, []),
+    ).toEqual([]);
+  });
+
   it("inherits container access and fails closed without an allow", async () => {
     expect(await listAuthorizedChunks(db, "acme", [engineering])).toEqual([]);
     await replaceContainerAces(db, "acme", containerId, [

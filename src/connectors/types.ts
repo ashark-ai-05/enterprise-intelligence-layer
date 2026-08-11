@@ -1,10 +1,17 @@
 import { z } from "zod";
 import type { IngestionScope, Source } from "../scopes/types.js";
+import { sourceSchema } from "../scopes/types.js";
 
 export const aceSchema = z.object({
   domain: z.string().min(1),
   principalId: z.string().min(1),
   effect: z.enum(["allow", "deny"]),
+});
+
+export const sourceLinkSchema = z.object({
+  source: sourceSchema,
+  sourceObjectId: z.string().min(1),
+  type: z.enum(["documents", "implemented-by", "tested-by"]),
 });
 
 export const sourceItemSchema = z.object({
@@ -14,6 +21,7 @@ export const sourceItemSchema = z.object({
   title: z.string().min(1),
   body: z.string(),
   metadata: z.record(z.unknown()),
+  links: z.array(sourceLinkSchema).default([]),
   acl: z.array(aceSchema),
   sourceUpdatedAt: z.string().datetime({ offset: true }),
   deleted: z.boolean().default(false),
@@ -24,6 +32,7 @@ export const connectorCursorSchema = z.object({
 });
 
 export type AccessControlEntry = z.infer<typeof aceSchema>;
+export type SourceLink = z.infer<typeof sourceLinkSchema>;
 export type SourceItem = z.input<typeof sourceItemSchema>;
 export type ValidatedSourceItem = z.output<typeof sourceItemSchema>;
 
