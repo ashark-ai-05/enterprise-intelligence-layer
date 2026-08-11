@@ -9,12 +9,9 @@
  * → src/security/acl.ts, docs/06-retrieval.md
  */
 
-import {
-  type AuthorizedChunk,
-  type PrincipalRef,
-  listAuthorizedChunks,
-} from "../security/acl.js";
+import { type AuthorizedChunk, listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
+import { toPrincipalRefs } from "./principals.js";
 import { tokenize, tokenizeCode } from "./stub-arms.js";
 import type {
   RetrievalArm,
@@ -94,15 +91,7 @@ export class IndexedLexicalArm implements RetrievalArm {
     const codeTerms = tokenizeCode(query.text);
     if (terms.length === 0 && codeTerms.length === 0) return [];
 
-    const principals: PrincipalRef[] = viewer.principals.map((principal) => {
-      const separator = principal.indexOf(":");
-      return separator === -1
-        ? { domain: "enterprise", principalId: principal }
-        : {
-            domain: principal.slice(0, separator),
-            principalId: principal.slice(separator + 1),
-          };
-    });
+    const principals = toPrincipalRefs(viewer.principals);
 
     const chunks = await listAuthorizedChunks(
       this.db,

@@ -29,3 +29,6 @@ export * from "./publication/generations.js";
 export * from "./publication/deletion.js";
 export * from "./retrieval/indexed-arm.js";
 export * from "./eval/corpus-gate.js";
+export * from "./retrieval/graph-arm.js";
+export * from "./retrieval/authorized-resolver.js";
+export * from "./retrieval/principals.js";
