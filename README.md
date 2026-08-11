@@ -40,6 +40,40 @@ pnpm check
 
 ## Corporate-machine checks
 
+### Fastest path: no install required
+
+If the package manager is broken — which is the first thing a locked-down image
+tends to break — this still runs. Node builtins only: no pnpm, no npm, no
+`node_modules`.
+
+```bash
+git clone https://github.com/ashark-ai-05/enterprise-intelligence-layer.git
+cd enterprise-intelligence-layer
+
+EIL_CONFLUENCE_URL="https://confluence.example.corp" \
+EIL_JIRA_URL="https://jira.example.corp" \
+EIL_MAAS_URL="https://models.example.corp" \
+  node scripts/probe.mjs
+```
+
+It reports the same facts as `pnpm doctor` — runtime, proxy, TLS bundle, source
+reachability, whether the model endpoint serves embeddings — treats a skip as an
+unknown rather than a pass, and exits non-zero on failure.
+
+**On the proxy specifically**, it measures the path a real client takes rather
+than one nothing uses. Node's global `fetch` ignores `HTTPS_PROXY` unless told
+otherwise; measured on Node 24:
+
+| | result |
+|---|---|
+| `HTTPS_PROXY` alone | request goes **direct**, proxy silently ignored |
+| `NODE_USE_ENV_PROXY=1` with `HTTPS_PROXY` | routed through the proxy |
+
+The probe sets that flag itself. Where a proxy is mandatory, the first form does
+not error — it hangs until timeout and reads as "the source is slow".
+
+### Toolchain diagnostics
+
 First confirm the managed Node/npm/pnpm toolchain. These commands do not print
 registry tokens or proxy passwords:
 
