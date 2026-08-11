@@ -66,10 +66,16 @@ adversarial ACL cases at either a ~300-object `ci` preset or a ~5,000-object
 holds at scale, not just on three hand-picked fixtures — then runs the same
 ranking regression gate CI checks on every PR (indexed lexical + persisted
 graph-expansion arms, scored against the corpus's own relevance judgments)
-and prints the measured recall/MRR/nDCG, not an asserted one. Only the
-Confluence/Jira/Git *source data* is stubbed or synthetic — no live connector
-has landed yet. `src/demo/run.ts` is meant to be extended rather than
-rewritten — each fixture block gets swapped for real connector/MCP output as
+and prints the measured recall/MRR/nDCG, not an asserted one — then calls
+the actual MCP tool surface (`search_enterprise`, `get_evidence`,
+`list_containers`, `get_freshness`) through `callTool`, the same choke point
+`node dist/cli.js serve` exposes over stdio to Amp/Copilot/Claude Code, so
+what the demo prints is what a real MCP client gets back, including the
+audited query log and the "forbidden looks identical to nonexistent"
+property. Only the Confluence/Jira/Git *source data* is stubbed or synthetic
+— no live connector has landed yet. `src/demo/run.ts` is meant to be
+extended rather than rewritten — each fixture block gets swapped for real
+connector/MCP output as
 that lands, and CI runs the demo on every push/PR so it can't silently rot.
 Runs on any machine with Node 22+; no proxy, no network, no corp credentials
 required.

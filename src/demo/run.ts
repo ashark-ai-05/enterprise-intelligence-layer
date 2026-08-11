@@ -33,6 +33,9 @@ import { runDoctor } from "../doctor/checks.js";
 import { embedPendingChunks } from "../embeddings/backfill.js";
 import { LocalWasmEmbedder } from "../embeddings/local-wasm.js";
 import {
+  EVAL_TENANT,
+  defaultArms,
+  evalViewer,
   runEvaluationGate,
   seedEvaluationCorpus,
 } from "../eval/corpus-gate.js";
@@ -50,6 +53,7 @@ import {
   markPrincipalUnmapped,
   replaceContainerAces,
 } from "../security/acl.js";
+import { InMemoryAuditSink, callTool } from "../serving/tools.js";
 import type { Database } from "../storage/database.js";
 import { detectCapabilities, openDatabase } from "../storage/database.js";
 import { migrate } from "../storage/migrations.js";
@@ -639,6 +643,70 @@ async function main(): Promise<void> {
       "same arms, same gate CI runs on every PR — this is the number a ranking change has to beat, not a demo-only stat",
     );
 
+    section("MCP tool surface — the same choke point Amp/Copilot will call");
+    const mcpAudit = new InMemoryAuditSink();
+    const mcpContext = {
+      db,
+      tenantId: EVAL_TENANT,
+      arms: defaultArms(db),
+      viewer: evalViewer(evalSeed.containerIds),
+      audit: mcpAudit,
+    };
+    const searchQuery =
+      evalSeed.corpus.relevance[0]?.query ?? "payment retries";
+    const searchResult = await callTool(
+      "search_enterprise",
+      { query: searchQuery, limit: 3 },
+      mcpContext,
+    );
+    const parsedSearch = JSON.parse(searchResult.content) as {
+      results: { id: string; source: string; title: string }[];
+    };
+    console.log(
+      `search_enterprise("${searchQuery}"): ${parsedSearch.results.length} result(s)`,
+    );
+    for (const hit of parsedSearch.results) {
+      console.log(`  - [${hit.source}] ${hit.id} ${hit.title}`);
+    }
+
+    const firstId = parsedSearch.results[0]?.id;
+    if (firstId) {
+      const evidence = await callTool(
+        "get_evidence",
+        { id: firstId },
+        mcpContext,
+      );
+      const parsedEvidence = JSON.parse(evidence.content) as {
+        found: boolean;
+        body?: string;
+      };
+      console.log(
+        `get_evidence("${firstId}"): found=${parsedEvidence.found}, ${parsedEvidence.body?.length ?? 0} byte(s) of body`,
+      );
+    }
+
+    const missing = await callTool(
+      "get_evidence",
+      { id: "does-not-exist" },
+      mcpContext,
+    );
+    console.log(
+      `get_evidence("does-not-exist"): ${missing.content.replace(/\s+/g, " ")}`,
+    );
+    console.log(
+      "(a forbidden id would return the exact same shape — confirming existence would leak it)",
+    );
+
+    const containers = await callTool("list_containers", {}, mcpContext);
+    console.log(`list_containers: ${containers.content.replace(/\s+/g, " ")}`);
+
+    const freshness = await callTool("get_freshness", {}, mcpContext);
+    console.log(`get_freshness: ${freshness.content.replace(/\s+/g, " ")}`);
+
+    console.log(
+      `audit: ${mcpAudit.entries.length} entries recorded (query text and result counts only — never result content)`,
+    );
+
     section(
       "Doctor — the same environment facts CI and a corp machine both see",
     );
@@ -672,7 +740,13 @@ async function main(): Promise<void> {
       "         indexed lexical + graph-expansion retrieval arms, persisted provenance-bearing",
     );
     console.log(
-      "         links, durable fenced jobs with retry/DLQ, and a measured ranking regression gate",
+      "         links, durable fenced jobs with retry/DLQ, a measured ranking regression gate,",
+    );
+    console.log(
+      "         and the MCP tool surface (search_enterprise, get_evidence, list_containers,",
+    );
+    console.log(
+      "         get_freshness) — the same choke point `node dist/cli.js serve` exposes over stdio",
     );
     console.log(
       "stub:    Confluence/Jira source data above — no live connector has landed yet",
