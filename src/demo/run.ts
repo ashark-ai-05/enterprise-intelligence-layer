@@ -32,6 +32,11 @@ import {
 import { runDoctor } from "../doctor/checks.js";
 import { embedPendingChunks } from "../embeddings/backfill.js";
 import { LocalWasmEmbedder } from "../embeddings/local-wasm.js";
+import {
+  runEvaluationGate,
+  seedEvaluationCorpus,
+} from "../eval/corpus-gate.js";
+import { formatReport } from "../eval/harness.js";
 import { applyDiversityCap, rrf } from "../fusion/rrf.js";
 import type { Arm } from "../fusion/rrf.js";
 import { ingestScope } from "../ingestion/pipeline.js";
@@ -623,6 +628,18 @@ async function main(): Promise<void> {
     }
 
     section(
+      "Evaluation — retrieval quality, measured against the corpus's own relevance labels",
+    );
+    const evalSeed = await seedEvaluationCorpus(db, syntheticCorpusPresets.ci);
+    const evalReport = await runEvaluationGate(db, evalSeed, undefined, {
+      limit: 20,
+    });
+    console.log(formatReport(evalReport));
+    console.log(
+      "same arms, same gate CI runs on every PR — this is the number a ranking change has to beat, not a demo-only stat",
+    );
+
+    section(
       "Doctor — the same environment facts CI and a corp machine both see",
     );
     const report = await runDoctor();
@@ -649,7 +666,13 @@ async function main(): Promise<void> {
       "         atomic publication, auditable deletion lifecycle, diversity cap, doctor checks,",
     );
     console.log(
-      "         a deterministic synthetic corpus proving the same pipeline holds at scale",
+      "         a deterministic synthetic corpus proving the same pipeline holds at scale,",
+    );
+    console.log(
+      "         indexed lexical + graph-expansion retrieval arms, persisted provenance-bearing",
+    );
+    console.log(
+      "         links, durable fenced jobs with retry/DLQ, and a measured ranking regression gate",
     );
     console.log(
       "stub:    Confluence/Jira source data above — no live connector has landed yet",

@@ -63,7 +63,10 @@ diversity cap, doctor checks — then does it all again against
 Jira issues, git repos, cross-source links, relevance judgments, and
 adversarial ACL cases at either a ~300-object `ci` preset or a ~5,000-object
 `stress` preset via `EIL_DEMO_CORPUS=stress`) to prove the same pipeline
-holds at scale, not just on three hand-picked fixtures. Only the
+holds at scale, not just on three hand-picked fixtures — then runs the same
+ranking regression gate CI checks on every PR (indexed lexical + persisted
+graph-expansion arms, scored against the corpus's own relevance judgments)
+and prints the measured recall/MRR/nDCG, not an asserted one. Only the
 Confluence/Jira/Git *source data* is stubbed or synthetic — no live connector
 has landed yet. `src/demo/run.ts` is meant to be extended rather than
 rewritten — each fixture block gets swapped for real connector/MCP output as
