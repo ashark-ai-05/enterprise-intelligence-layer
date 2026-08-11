@@ -4,8 +4,8 @@ One index across Confluence, Jira, Bitbucket, code, notes and PDFs. Hybrid
 lexical + semantic retrieval. Delta ingestion. ACL-correct at query time.
 Runs behind a corporate proxy with no admin rights on the machine.
 
-This repository is **design only**. No implementation code. It exists to be
-argued with before anything is built.
+Design docs plus the P0 implementation. `docs/` is the argument; `src/` is what
+has been built and verified so far.
 
 ---
 
@@ -102,10 +102,42 @@ sequenced in [the roadmap](docs/11-roadmap.md).
 
 ---
 
+## Building
+
+```bash
+pnpm install
+pnpm test          # 98 tests
+pnpm typecheck
+
+npx tsx src/cli.ts doctor        # the constraint checklist, executable
+npx tsx src/cli.ts db migrate    # embedded profile by default, no config needed
+npx tsx src/cli.ts scope add confluence space ARCH --schedule 1h
+npx tsx src/cli.ts scope list
+```
+
+`doctor` reports **evidence, not opinions**, and reports `skip` rather than
+guessing. A skip is an unknown, not a pass.
+
+### Shipped so far (P0)
+
+| Area | State |
+|---|---|
+| RRF fusion + source-diversity cap | Built, 21 tests |
+| Proxy dispatch (`ProxyAgent`, NO_PROXY parsing) | Built, 29 tests |
+| Storage port, embedded (PGlite) profile | Built, 28 tests |
+| Migration runner, capability detection | Built |
+| Scope registry with refcounted removal | Built |
+| `eil doctor` | Built, 20 tests |
+| Server (hosted Postgres) profile | **Not implemented** — needs a live Postgres in CI to be worth trusting |
+| Federated search, MCP server | Next (P0-6, P0-8) |
+
+---
+
 ## Status
 
-Design under review. Nothing here has been implemented, benchmarked in this
-environment, or approved by a security review. Numbers marked **(measured)**
+Design reviewed; P0 implementation under way. Nothing here has been benchmarked
+against a real corpus in the target environment, or approved by a security
+review. Numbers marked **(measured)**
 come from the `eil` repository's own calibration notes; numbers marked
 **(estimated)** are arithmetic from stated assumptions and should be re-measured
 before anyone commits to them.

@@ -1,0 +1,30 @@
+{
+  "name": "eil",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise Intelligence Layer",
+  "type": "module",
+  "bin": {
+    "eil": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "doctor": "tsx src/cli.ts doctor"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "undici": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
