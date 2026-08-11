@@ -24,6 +24,8 @@ import {
   StubJiraConnector,
 } from "../connectors/stubs.js";
 import { runDoctor } from "../doctor/checks.js";
+import { embedPendingChunks } from "../embeddings/backfill.js";
+import { LocalWasmEmbedder } from "../embeddings/local-wasm.js";
 import { applyDiversityCap, rrf } from "../fusion/rrf.js";
 import type { Arm } from "../fusion/rrf.js";
 import { ingestScope } from "../ingestion/pipeline.js";
@@ -235,6 +237,19 @@ async function main(): Promise<void> {
       `chunk-level ACL overlays: ${overlayCount.rows[0]?.count ?? "0"} (the restricted Jira comment above, not inherited from the issue)`,
     );
 
+    section("Embeddings — vendored MiniLM model, offline WASM runtime");
+    const localEmbedder = new LocalWasmEmbedder();
+    const embeddingResult = await embedPendingChunks(db, localEmbedder);
+    const vectorCount = await db.query<{ count: string; dimension: number }>(
+      `SELECT count(*)::text AS count, max(dimension)::int AS dimension
+       FROM chunk_vectors WHERE model_id = $1`,
+      [localEmbedder.id],
+    );
+    console.log(
+      `${embeddingResult.embedded} changed chunk(s) embedded locally; ${vectorCount.rows[0]?.count ?? "0"} stored at ${vectorCount.rows[0]?.dimension ?? 0} dimensions`,
+    );
+    console.log(`model: ${localEmbedder.id}; remote model access: none`);
+
     section("Reconciliation — a source-side deletion, detected by ID diff");
     const confluenceConnectorAfterDeletion = new StubConfluenceConnector([
       confluenceEvent(
@@ -282,12 +297,9 @@ async function main(): Promise<void> {
       "PAY",
       "PAY project",
     );
-    // Each principal below maps to exactly one enterprise identity —
-    // principal_mappings is keyed by (tenant, domain, source_identifier)
-    // with no subject in the key, so a shared "group" identifier can only
-    // ever resolve to one identity. Real group membership is a directory
-    // lookup this milestone doesn't model yet; here each container ACE
-    // grants an individual account, the same shape a personal share takes.
+    // These fixture ACEs use individual accounts. Shared group principals are
+    // supported through the many-to-many mapping table; a real authority
+    // connector will populate those memberships later.
     await replaceContainerAces(db, TENANT, confluenceContainerId, [
       { domain: "confluence", principalId: "user:alice", effect: "allow" },
       { domain: "confluence", principalId: "user:carol", effect: "allow" },
@@ -426,7 +438,10 @@ async function main(): Promise<void> {
     console.log(
       "         principal mapping, container ACLs, deny-wins fail-closed authorization,",
     );
-    console.log("         rank fusion, diversity cap, doctor checks");
+    console.log(
+      "         offline WASM embeddings, changed-chunk vectors, rank fusion,",
+    );
+    console.log("         diversity cap, doctor checks");
     console.log(
       "stub:    Confluence/Jira source data above — no live connector has landed yet",
     );

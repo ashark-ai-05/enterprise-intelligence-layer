@@ -22,3 +22,6 @@ export * from "./eval/harness.js";
 export * from "./federated/adapters.js";
 export * from "./federated/query-language.js";
 export * from "./corpus/synthetic.js";
+export * from "./embeddings/types.js";
+export * from "./embeddings/local-wasm.js";
+export * from "./embeddings/backfill.js";
