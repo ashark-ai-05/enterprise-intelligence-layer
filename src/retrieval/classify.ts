@@ -3,6 +3,12 @@
  *
  * The classifier moves arm *weights*. It never removes an arm from the fan-out.
  *
+ * Graph expansion is weighted **below** every direct-match arm, everywhere. A
+ * linked neighbour is corroborating evidence, not primary evidence, and RRF
+ * consumes rank — so an unweighted expansion arm lets a rank-1 neighbour
+ * outrank a rank-5 text match. Measured on single-target queries, that cost
+ * recall@10 0.800 → 0.550 by displacement.
+ *
  * That restraint is the whole design: a router that cuts arms is a router whose
  * mistakes are invisible, because the arm that would have found the answer was
  * never asked. Weighting a wrong guess costs a few positions; cutting an arm on
@@ -75,7 +81,12 @@ export function classify(text: string): Classification {
     return {
       shape: "path",
       literal: trimmed,
-      weights: { "code-lexical": 5, "lexical-strict": 2, semantic: 0.3 },
+      weights: {
+        "code-lexical": 5,
+        "lexical-strict": 2,
+        semantic: 0.3,
+        "graph-expand": 0.3,
+      },
     };
   }
 
@@ -83,7 +94,12 @@ export function classify(text: string): Classification {
     return {
       shape: "identifier",
       literal: trimmed,
-      weights: { "code-lexical": 4, "lexical-strict": 2, semantic: 0.5 },
+      weights: {
+        "code-lexical": 4,
+        "lexical-strict": 2,
+        semantic: 0.5,
+        "graph-expand": 0.3,
+      },
     };
   }
 
