@@ -42,9 +42,11 @@ pnpm demo
 
 Self-contained — an embedded PGlite database in a throwaway temp directory,
 zero external services, zero credentials, zero admin install. It exercises
-real, merged code (storage, scope registry, rank fusion, diversity cap,
-doctor checks) end to end; only the Confluence/Jira *content* is a fixture,
-because no live connector has landed yet. `src/demo/run.ts` is meant to be
+real, merged code end to end: storage, scope registry, the real ingestion
+pipeline (hashing, ACL persistence, checkpointing) via `ingestScope`, rank
+fusion, diversity cap, doctor checks. Only the Confluence/Jira *source data*
+is stubbed (`StubConfluenceConnector`/`StubJiraConnector`), because no live
+connector has landed yet. `src/demo/run.ts` is meant to be
 extended rather than rewritten — each fixture block gets swapped for real
 connector/MCP output as that lands, and CI runs the demo on every push/PR so
 it can't silently rot. Runs on any machine with Node 22+; no proxy, no
