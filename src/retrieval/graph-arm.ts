@@ -33,10 +33,12 @@ export interface Link {
 /**
  * Neighbours of a set of documents.
  *
- * An interface rather than a table because no link store exists yet: the corpus
- * generates links, nothing persists them. Implementing this against an
- * in-memory edge list proves whether expansion is worth a schema change, before
- * anyone builds the schema.
+ * An interface so the arm is independent of where edges live. `DatabaseLinkSource`
+ * walks the persisted `resource_links` store; `InMemoryLinkSource` is for tests
+ * and was how the value of that store was measured before it was built.
+ *
+ * Implementations may return rows in any order. The arm must not depend on it —
+ * see the ordering note in `search`.
  */
 export interface LinkSource {
   neighbours(sourceObjectIds: readonly string[]): Promise<Link[]>;
@@ -97,6 +99,21 @@ export interface GraphArmOptions {
 
 const DEFAULTS = { seedLimit: 5, depth: 1 } as const;
 
+/**
+ * Order neighbours of the same seed by link type.
+ *
+ * There is no inherently correct order here, but there must be a *deterministic*
+ * one that the arm chooses rather than inherits — otherwise ranking depends on
+ * how a store happened to sort its rows. Documentation first is the deliberate
+ * choice: for a knowledge platform, the page explaining a thing is usually the
+ * better second result than the file implementing it.
+ */
+const TYPE_PRIORITY: Readonly<Record<LinkType, number>> = {
+  documents: 0,
+  "implemented-by": 1,
+  "tested-by": 2,
+};
+
 export class GraphExpansionArm implements RetrievalArm {
   readonly name: string;
 
@@ -123,36 +140,67 @@ export class GraphExpansionArm implements RetrievalArm {
     );
     if (seeds.length === 0) return [];
 
-    const seedIds = new Set(seeds.map((hit) => hit.id));
-    let frontier = [...seedIds];
-    const discovered = new Set<string>();
+    // Frontier order is rank order: seeds arrive ranked, and a neighbour of the
+    // best seed should outrank a neighbour of the fifth.
+    let frontier = seeds.map((hit) => hit.id);
+    const seen = new Set(frontier);
+    const discovered: string[] = [];
 
     for (let hop = 0; hop < depth; hop += 1) {
       const links = await this.links.neighbours(frontier);
-      const next: string[] = [];
 
+      // Group by origin so ordering derives from *seed rank*, never from the
+      // order a LinkSource happened to return rows in.
+      //
+      // This matters more than it looks. The arm's output position is its rank,
+      // and RRF consumes rank — so inheriting a store's row order silently
+      // makes ranking depend on how the store sorts. Measured: an in-memory
+      // source interleaving each seed's neighbours scored recall@10 0.983,
+      // while a database source ordering by id scored 0.700 over the same
+      // edges, because sorting by id put every wiki page ahead of every code
+      // file and pushed the relevant file past k.
+      const byOrigin = new Map<string, Link[]>();
       for (const link of links) {
         if (
           this.options.types !== undefined &&
           !this.options.types.includes(link.type)
         )
           continue;
-        // Never return the seeds themselves. Their own arm already ranked them,
-        // and re-returning them would let one document collect a second RRF
-        // contribution simply for being well-linked.
-        if (seedIds.has(link.to) || discovered.has(link.to)) continue;
-        discovered.add(link.to);
-        next.push(link.to);
+        const existing = byOrigin.get(link.from);
+        if (existing === undefined) byOrigin.set(link.from, [link]);
+        else existing.push(link);
+      }
+
+      const next: string[] = [];
+      for (const origin of frontier) {
+        // Within one seed, order by link type then id — again the arm's choice,
+        // not the store's.
+        const ordered = (byOrigin.get(origin) ?? [])
+          .slice()
+          .sort(
+            (a, b) =>
+              TYPE_PRIORITY[a.type] - TYPE_PRIORITY[b.type] ||
+              (a.to < b.to ? -1 : a.to > b.to ? 1 : 0),
+          );
+        for (const { to: neighbour } of ordered) {
+          // Never return the seeds themselves. Their own arm already ranked
+          // them, and re-returning them would let one document collect a second
+          // RRF contribution simply for being well-linked.
+          if (seen.has(neighbour)) continue;
+          seen.add(neighbour);
+          discovered.push(neighbour);
+          next.push(neighbour);
+        }
       }
 
       if (next.length === 0) break;
       frontier = next;
     }
 
-    if (discovered.size === 0) return [];
+    if (discovered.length === 0) return [];
 
     // The ACL check happens here, on resolution — a link is reachability, never
     // permission.
-    return this.resolver.resolve([...discovered], viewer, query);
+    return this.resolver.resolve(discovered, viewer, query);
   }
 }

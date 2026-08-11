@@ -24,7 +24,10 @@ import {
   syntheticCorpusPresets,
 } from "../corpus/synthetic.js";
 import { ingestScope } from "../ingestion/pipeline.js";
+import { DatabaseLinkSource } from "../links/store.js";
 import { publishCoreGeneration } from "../publication/generations.js";
+import { AuthorizedHitResolver } from "../retrieval/authorized-resolver.js";
+import { GraphExpansionArm } from "../retrieval/graph-arm.js";
 import { IndexedLexicalArm } from "../retrieval/indexed-arm.js";
 import { retrieve } from "../retrieval/pipeline.js";
 import type { RetrievalArm, Viewer } from "../retrieval/types.js";
@@ -154,6 +157,23 @@ export async function seedEvaluationCorpus(
   };
 }
 
+/**
+ * The arms the gate scores by default: lexical retrieval plus graph expansion
+ * over the persisted link store. This is the shipped configuration, so the
+ * committed baseline describes what the product actually does.
+ */
+export function defaultArms(db: Database): RetrievalArm[] {
+  const lexical = new IndexedLexicalArm(db, { tenantId: EVAL_TENANT });
+  return [
+    lexical,
+    new GraphExpansionArm(
+      lexical,
+      new DatabaseLinkSource(db, EVAL_TENANT),
+      new AuthorizedHitResolver(db, EVAL_TENANT),
+    ),
+  ];
+}
+
 export interface GateOptions {
   readonly k?: number;
   /** Cap how many judgments are run. The full CI set is 100; a smaller slice keeps iteration fast. */
@@ -175,9 +195,7 @@ export async function runEvaluationGate(
 ): Promise<EvaluationReport> {
   const k = options.k ?? 10;
   const viewer = evalViewer(seed.containerIds);
-  const activeArms = arms ?? [
-    new IndexedLexicalArm(db, { tenantId: EVAL_TENANT }),
-  ];
+  const activeArms = arms ?? defaultArms(db);
 
   const judgments =
     options.limit === undefined
