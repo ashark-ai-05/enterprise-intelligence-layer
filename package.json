@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "onnxruntime-web": "^1.24.0",
     "pg": "^8.16.3",
     "undici": "^7.2.0",
     "zod": "^3.25.76"
