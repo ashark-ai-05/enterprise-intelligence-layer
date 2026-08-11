@@ -89,6 +89,27 @@ describe("identity and ACL plane", () => {
     expect(await listAuthorizedChunks(db, "acme", [engineering])).toEqual([]);
   });
 
+  it("pushes an optional lexical query through the same authorized read", async () => {
+    await replaceContainerAces(db, "acme", containerId, [
+      { ...engineering, effect: "allow" },
+    ]);
+    expect(
+      await listAuthorizedChunks(
+        db,
+        "acme",
+        [engineering],
+        [],
+        "exponential missing-term",
+      ),
+    ).toHaveLength(1);
+    expect(
+      await listAuthorizedChunks(db, "acme", [engineering], [], "salary"),
+    ).toEqual([]);
+    expect(
+      await listAuthorizedChunks(db, "acme", [engineering], [], "   "),
+    ).toHaveLength(1);
+  });
+
   it("inherits container access and fails closed without an allow", async () => {
     expect(await listAuthorizedChunks(db, "acme", [engineering])).toEqual([]);
     await replaceContainerAces(db, "acme", containerId, [
