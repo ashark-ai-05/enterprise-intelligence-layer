@@ -28,3 +28,4 @@ export * from "./embeddings/backfill.js";
 export * from "./publication/generations.js";
 export * from "./publication/deletion.js";
 export * from "./retrieval/indexed-arm.js";
+export * from "./eval/corpus-gate.js";

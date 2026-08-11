@@ -1,0 +1,6 @@
+{
+  "recallAtK": 0.333,
+  "mrr": 0.967,
+  "ndcgAtK": 0.458,
+  "zeroResults": 0
+}
