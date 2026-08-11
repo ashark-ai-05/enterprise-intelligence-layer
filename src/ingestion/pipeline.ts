@@ -8,7 +8,10 @@ import {
   connectorCursorSchema,
   sourceItemSchema,
 } from "../connectors/types.js";
+import { normalizerFor } from "../normalization/normalizers.js";
+import { replaceResourceChunks } from "../normalization/persist.js";
 import { getScope, saveScopeCheckpoint } from "../scopes/service.js";
+import type { Source } from "../scopes/types.js";
 import type { Database } from "../storage/database.js";
 import { withTransaction } from "../storage/database.js";
 import { sha256, stableJson } from "./hash.js";
@@ -76,7 +79,7 @@ async function ingestItem(
   db: Database,
   tenantId: string,
   scopeId: string,
-  source: string,
+  source: Source,
   item: ValidatedSourceItem,
   counters: IngestionCounters,
 ): Promise<void> {
@@ -149,6 +152,14 @@ async function ingestItem(
       await tx.query("DELETE FROM resource_aces WHERE resource_id = $1", [
         resourceId,
       ]);
+      await tx.query(
+        "DELETE FROM chunk_aces WHERE chunk_id IN (SELECT id FROM resource_chunks WHERE resource_id = $1)",
+        [resourceId],
+      );
+      await tx.query(
+        "UPDATE resource_chunks SET deleted_at = now(), updated_at = now() WHERE resource_id = $1",
+        [resourceId],
+      );
       counters.deleted += 1;
       return;
     }
@@ -180,6 +191,11 @@ async function ingestItem(
         ],
       );
       await replaceAces(tx, resourceId, aces);
+      await replaceResourceChunks(
+        tx,
+        resourceId,
+        normalizerFor(source).normalize(item),
+      );
       counters.created += 1;
       counters.contentUpdated += 1;
       counters.metadataUpdated += 1;
@@ -216,6 +232,13 @@ async function ingestItem(
         ],
       );
       if (aclChanged) await replaceAces(tx, resourceId, aces);
+      if (contentChanged || metadataChanged) {
+        await replaceResourceChunks(
+          tx,
+          resourceId,
+          normalizerFor(source).normalize(item),
+        );
+      }
       if (contentChanged) counters.contentUpdated += 1;
       if (metadataChanged) counters.metadataUpdated += 1;
       if (aclChanged) counters.aclUpdated += 1;
