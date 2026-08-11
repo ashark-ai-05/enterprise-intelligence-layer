@@ -2,3 +2,6 @@ export * from "./storage/database.js";
 export * from "./storage/migrations.js";
 export * from "./scopes/service.js";
 export * from "./scopes/types.js";
+export * from "./fusion/rrf.js";
+export * from "./net/proxy.js";
+export * from "./doctor/checks.js";
