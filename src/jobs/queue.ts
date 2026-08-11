@@ -36,6 +36,11 @@ export interface Job {
   lastError: string | null;
 }
 
+export type JobLease = Pick<
+  Job,
+  "id" | "tenantId" | "leaseOwner" | "fenceToken"
+>;
+
 interface JobRow extends Record<string, unknown> {
   id: string;
   tenant_id: string;
@@ -135,12 +140,15 @@ export async function claimJob(
   tenantId: string,
   workerId: string,
   leaseSeconds = 60,
+  jobTypes?: readonly string[],
 ): Promise<Job | null> {
   if (!tenantId || !workerId) throw new Error("tenant and worker are required");
   if (!Number.isInteger(leaseSeconds) || leaseSeconds < 1) {
     throw new Error("leaseSeconds must be a positive integer");
   }
   return withTransaction(db, async (tx) => {
+    const normalizedJobTypes =
+      jobTypes === undefined ? null : [...new Set(jobTypes)];
     await tx.query(
       `UPDATE jobs SET status = 'dead_letter', lease_owner = NULL,
         lease_expires_at = NULL, last_error = COALESCE(last_error, 'lease expired'),
@@ -153,6 +161,7 @@ export async function claimJob(
     const candidate = await tx.query<{ id: string }>(
       `SELECT id FROM jobs
        WHERE tenant_id = $1 AND attempts < max_attempts
+         AND ($2::text[] IS NULL OR job_type = ANY($2::text[]))
          AND (
            scope_id IS NULL
            OR EXISTS (
@@ -166,7 +175,7 @@ export async function claimJob(
          )
        ORDER BY CASE lane WHEN 'live' THEN 0 ELSE 1 END, run_after, created_at, id
        FOR UPDATE${skipLocked} LIMIT 1`,
-      [tenantId],
+      [tenantId, normalizedJobTypes],
     );
     const id = candidate.rows[0]?.id;
     if (!id) return null;
@@ -183,6 +192,21 @@ export async function claimJob(
     if (!row) throw new Error("claimed job disappeared");
     return jobFromRow(row);
   });
+}
+
+export async function assertActiveJobLease(
+  db: Database,
+  job: JobLease,
+): Promise<void> {
+  if (!job.leaseOwner) throw new Error("job has no lease owner");
+  const active = await db.query<{ id: string }>(
+    `SELECT id FROM jobs
+     WHERE id = $1 AND tenant_id = $2 AND status = 'claimed'
+       AND lease_owner = $3 AND fence_token = $4 AND lease_expires_at > now()
+     FOR UPDATE`,
+    [job.id, job.tenantId, job.leaseOwner, job.fenceToken],
+  );
+  if (!active.rows[0]) throw new Error("stale or expired job lease");
 }
 
 async function fencedUpdate(

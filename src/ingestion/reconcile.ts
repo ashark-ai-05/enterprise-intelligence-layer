@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SourceConnector } from "../connectors/types.js";
+import { type JobLease, assertActiveJobLease } from "../jobs/queue.js";
 import { supersedePublishedGeneration } from "../publication/generations.js";
 import { getScope } from "../scopes/service.js";
 import type { Database } from "../storage/database.js";
@@ -18,6 +19,7 @@ export async function reconcileScope(
   tenantId: string,
   scopeId: string,
   connector: SourceConnector,
+  lease?: JobLease,
 ): Promise<ReconciliationCounters> {
   const scope = await getScope(db, tenantId, scopeId);
   if (scope.source !== connector.source) {
@@ -47,6 +49,7 @@ export async function reconcileScope(
   };
 
   await withTransaction(db, async (tx) => {
+    if (lease !== undefined) await assertActiveJobLease(tx, lease);
     for (const { resource_id: resourceId } of missing) {
       await tx.query(
         "DELETE FROM resource_scopes WHERE resource_id = $1 AND scope_id = $2",
