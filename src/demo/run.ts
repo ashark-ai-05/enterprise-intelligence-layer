@@ -29,6 +29,14 @@ import type { Arm } from "../fusion/rrf.js";
 import { ingestScope } from "../ingestion/pipeline.js";
 import { reconcileScope } from "../ingestion/reconcile.js";
 import { createScope, listScopes } from "../scopes/service.js";
+import {
+  assignResourceContainer,
+  ensureContainer,
+  listAuthorizedChunksForSubject,
+  mapPrincipal,
+  markPrincipalUnmapped,
+  replaceContainerAces,
+} from "../security/acl.js";
 import type { Database } from "../storage/database.js";
 import { detectCapabilities, openDatabase } from "../storage/database.js";
 import { migrate } from "../storage/migrations.js";
@@ -62,13 +70,11 @@ function confluenceEvent(
       title,
       body,
       metadata: { pageId, spaceKey },
-      acl: [
-        {
-          domain: "confluence",
-          principalId: `space:${spaceKey}:read`,
-          effect: "allow",
-        },
-      ],
+      // No resource-level ACL override — access is governed entirely by
+      // the container ACL set up in the Authorization section below. A
+      // non-empty acl here would be a sparse per-resource override (e.g.
+      // one page narrower than its space), which none of these need.
+      acl: [],
       sourceUpdatedAt: "2026-01-01T00:00:00Z",
       deleted: false,
     },
@@ -100,13 +106,10 @@ function jiraEvent(
       title,
       body,
       metadata: { issueKey, projectKey, comments },
-      acl: [
-        {
-          domain: "jira",
-          principalId: `project:${projectKey}:read`,
-          effect: "allow",
-        },
-      ],
+      // Same as Confluence: no resource-level override, access comes from
+      // the container ACL. Restricted comments still get their own
+      // chunk-level override via `visibility` above.
+      acl: [],
       sourceUpdatedAt: "2026-01-01T00:00:00Z",
       deleted: false,
     },
@@ -262,6 +265,108 @@ async function main(): Promise<void> {
       `confluence chunks remaining after reconciliation: ${remainingChunks.rows[0]?.count ?? "0"} (tombstoned, not deleted — recoverable until a real purge)`,
     );
 
+    section(
+      "Authorization — mapped/unmapped principals, container ACLs, chunk overrides",
+    );
+    const confluenceContainerId = await ensureContainer(
+      db,
+      TENANT,
+      "confluence",
+      "PAY",
+      "PAY space",
+    );
+    const jiraContainerId = await ensureContainer(
+      db,
+      TENANT,
+      "jira",
+      "PAY",
+      "PAY project",
+    );
+    // Each principal below maps to exactly one enterprise identity —
+    // principal_mappings is keyed by (tenant, domain, source_identifier)
+    // with no subject in the key, so a shared "group" identifier can only
+    // ever resolve to one identity. Real group membership is a directory
+    // lookup this milestone doesn't model yet; here each container ACE
+    // grants an individual account, the same shape a personal share takes.
+    await replaceContainerAces(db, TENANT, confluenceContainerId, [
+      { domain: "confluence", principalId: "user:alice", effect: "allow" },
+      { domain: "confluence", principalId: "user:carol", effect: "allow" },
+    ]);
+    await replaceContainerAces(db, TENANT, jiraContainerId, [
+      { domain: "jira", principalId: "user:alice", effect: "allow" },
+      { domain: "jira", principalId: "user:carol", effect: "allow" },
+      { domain: "jira", principalId: "user:eve", effect: "allow" },
+    ]);
+    const { rows: resourceRows } = await db.query<{
+      id: string;
+      source: string;
+    }>(
+      "SELECT id, source FROM resources WHERE tenant_id = $1 AND deleted_at IS NULL",
+      [TENANT],
+    );
+    for (const resource of resourceRows) {
+      const containerId =
+        resource.source === "confluence"
+          ? confluenceContainerId
+          : jiraContainerId;
+      await assignResourceContainer(db, TENANT, resource.id, containerId);
+    }
+
+    await mapPrincipal(db, TENANT, "alice@example.com", {
+      domain: "confluence",
+      principalId: "user:alice",
+    });
+    await mapPrincipal(db, TENANT, "alice@example.com", {
+      domain: "jira",
+      principalId: "user:alice",
+    });
+    await mapPrincipal(db, TENANT, "carol@example.com", {
+      domain: "confluence",
+      principalId: "user:carol",
+    });
+    await mapPrincipal(db, TENANT, "carol@example.com", {
+      domain: "jira",
+      principalId: "user:carol",
+    });
+    await mapPrincipal(db, TENANT, "carol@example.com", {
+      domain: "jira-role",
+      principalId: "Service Desk Team",
+    });
+    await mapPrincipal(db, TENANT, "eve@example.com", {
+      domain: "jira",
+      principalId: "user:eve",
+    });
+
+    async function accessSummary(subject: string): Promise<string> {
+      const chunks = await listAuthorizedChunksForSubject(
+        db as Database,
+        TENANT,
+        subject,
+      );
+      const restricted = chunks.some((c) => c.stableKey === "comment:c2");
+      return `${chunks.length} chunk(s) visible${restricted ? ", including the restricted comment" : " — restricted comment stays hidden"}`;
+    }
+
+    console.log(
+      `alice (mapped, no Service Desk role):  ${await accessSummary("alice@example.com")}`,
+    );
+    console.log(
+      `carol (mapped + Service Desk role):    ${await accessSummary("carol@example.com")}`,
+    );
+    console.log(
+      `dave  (never mapped — fail closed):    ${await accessSummary("dave@example.com")}`,
+    );
+    console.log(
+      `eve   (mapped, before revocation):     ${await accessSummary("eve@example.com")}`,
+    );
+    await markPrincipalUnmapped(db, TENANT, {
+      domain: "jira",
+      principalId: "user:eve",
+    });
+    console.log(
+      `eve   (same principal, after revocation): ${await accessSummary("eve@example.com")}`,
+    );
+
     section("Rank fusion — same module that will fuse real search arms");
     const { rows } = await db.query<{
       source: string;
@@ -317,6 +422,9 @@ async function main(): Promise<void> {
     );
     console.log(
       "         structural chunking, chunk-level ACL overlays, ID-diff reconciliation,",
+    );
+    console.log(
+      "         principal mapping, container ACLs, deny-wins fail-closed authorization,",
     );
     console.log("         rank fusion, diversity cap, doctor checks");
     console.log(
