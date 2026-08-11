@@ -8,6 +8,7 @@ export * from "./ingestion/pipeline.js";
 export * from "./ingestion/reconcile.js";
 export * from "./normalization/types.js";
 export * from "./normalization/normalizers.js";
+export * from "./security/acl.js";
 export * from "./fusion/rrf.js";
 export * from "./net/proxy.js";
 export * from "./doctor/checks.js";
