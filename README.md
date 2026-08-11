@@ -52,7 +52,11 @@ pipeline (hashing, ACL persistence, checkpointing) via `ingestScope`,
 structural chunking with chunk-level ACL overlays (a restricted Jira comment
 stays restricted independent of its issue), ID-diff reconciliation via
 `reconcileScope` (a source-side deletion detaches and tombstones, chunks
-included), rank fusion, diversity cap, doctor checks. Only the Confluence/Jira
+included), principal mapping and container ACLs via `src/security/acl.ts`
+(mapped vs. unmapped subjects, deny-wins fail-closed authorization, and
+immediate access removal on revocation — demonstrated with five named
+subjects, one of whom loses access mid-run), rank fusion, diversity cap,
+doctor checks. Only the Confluence/Jira
 *source data* is stubbed (`StubConfluenceConnector`/`StubJiraConnector`),
 because no live connector has landed yet. `src/demo/run.ts` is meant to be
 extended rather than rewritten — each fixture block gets swapped for real
