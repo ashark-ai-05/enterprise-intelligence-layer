@@ -10,7 +10,7 @@ P0-8	P0	MCP stdio server exposing search_enterprise	M	P0-6,P0-7
 P0-9	P0	Query, result and zero-result logging to a local file	S	P0-8
 P0-10	P0	Wire into Amp and Copilot; dogfood for a week	S	P0-8
 P0-11	P0	Start works-council/DPIA and service-account conversations	S
-P1-1	P1	Schema v1 + SQL migration runner	M	P0-10
+P1-1	P1	Schema v1 + SQL migration runner (scopes, document_scopes, capabilities)	M	P0-10
 P1-2	P1	ACL by reference: container_aces / document_aces / chunk_aces + visibility function	L	P1-1
 P1-3	P1	principal_map + (authorization_domain, identifier) principals; unmapped implies DENY	L	P1-1
 P1-4	P1	Directory group expansion + 5-minute cache	M	P1-3
@@ -46,7 +46,7 @@ P2-14	P2	Demote federation to a flag; add nightly ACL drift job	M	P2-5
 P3-1	P3	Embedder interface + local ONNX implementation + WASM fallback	L	P2-14
 P3-2	P3	MaaS Embedder implementation for query-time embeddings	M	P3-1,P0-2
 P3-3	P3	Vector storage with model id stamped per vector	M	P3-1
-P3-4	P3	Vector funnel: signatures, IVF probe, Hamming, mandatory exact rescore	L	P3-3
+P3-4	P3	Exact vector scan with container pre-filter (funnel deferred until >1M chunks)	M	P3-3
 P3-5	P3	Backfill lane: checkpointed, off-peak, restartable	M	P3-4
 P3-6	P3	Semantic arm with container pre-filter first	M	P3-4
 P3-7	P3	Golden set to 300 pairs; CI regression gate	M	P1-15
@@ -70,3 +70,11 @@ P5-4	P5	Read replicas + rpt.* views, aggregate-only	M	P5-1
 P5-5	P5	Per-principal rate limits, timeouts, connection pool sizing	M	P5-2
 P5-6	P5	Injection posture: provenance markers, ingest-time flagging, no-write-loop rule	M	P5-2
 P5-7	P5	Security review and ACL red-team green as the platform-mode entry gate	M	P5-6
+P0-12	P0	Storage port: embedded (PGlite) + server profiles, one schema, capability probe at boot	M	P0-4
+P0-13	P0	eil doctor: executable constraint checklist (proxy, mirror, runtime, db, sources)	M	P0-5
+P1-20	P1	Scope registry: scopes + document_scopes, selectors per source, refcount purge	L	P1-1
+P1-21	P1	Scope CLI + MCP tools: add/list/remove/sync, scope discovery	M	P1-20
+P1-22	P1	Out-of-scope stubs + reference counting as the scope backlog	M	P1-20
+P1-23	P1	on-reference lazy ingestion trigger	S	P1-22
+P2-15	P2	Per-scope cursors, schedules and failure isolation	M	P1-20
+P3-11	P3	db export/import/verify between profiles, exercised in CI	M	P0-12

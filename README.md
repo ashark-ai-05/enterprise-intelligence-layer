@@ -54,7 +54,8 @@ Everything else follows from these.
 | [12 — Risk register](docs/12-risk-register.md) | What actually kills this, ranked, with mitigations |
 | [13 — System diagram & tech stack](docs/13-system-diagram-and-tech-stack.md) | The whole system on one page, every component's technology and its fallback, and the two extension seams |
 | [14 — Prior art, gaps & pre-build changes](docs/14-prior-art-gaps-and-pre-build-changes.md) | What Onyx, ManifoldCF, Elastic and Sourcegraph already solved; 13 gaps in this design; what to change and what to cut before writing code |
-| [15 — Open questions & delivery plan](docs/15-open-questions-and-delivery-plan.md) | The revised eight-plane architecture, 26 open questions each with a recommended default, and 71 tasks with sizes, dependencies and the critical path ([`tasks/TASKS.tsv`](tasks/TASKS.tsv)) |
+| [15 — Open questions & delivery plan](docs/15-open-questions-and-delivery-plan.md) | The revised eight-plane architecture, 26 open questions each with a recommended default, and the task breakdown with sizes, dependencies and the critical path ([`tasks/TASKS.tsv`](tasks/TASKS.tsv)) |
+| [16 — Scoped ingestion & storage profiles](docs/16-scoped-ingestion-and-storage-profiles.md) | Explicit scopes replace whole-instance crawling; embedded and hosted Postgres as one schema. Collapses capacity by ~100× and removes approximate vector search from the build |
 
 ### Decisions
 | ADR | Decision |
@@ -69,6 +70,8 @@ Everything else follows from these.
 | [0008](docs/adr/0008-mcp-tools-are-escalation-not-ingestion.md) | Existing MCP tools serve the live lane, not the index lane |
 | [0009](docs/adr/0009-proxy-and-no-install-runtime.md) | Pure-JS/WASM runtime, explicit proxy dispatch, vendored models |
 | [0010](docs/adr/0010-what-not-to-index.md) | Logs, metrics and dashboards are referenced, not indexed |
+| [0011](docs/adr/0011-scope-driven-ingestion.md) | Ingestion is scope-driven, not crawl-driven |
+| [0012](docs/adr/0012-storage-profiles.md) | Two storage profiles (embedded, server), one schema |
 
 ---
 
