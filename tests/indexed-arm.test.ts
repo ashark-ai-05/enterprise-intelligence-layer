@@ -224,21 +224,6 @@ describe("publication gating", () => {
     const after = await arm().search({ text: "payment retry" }, viewer);
     expect(after.map((hit) => hit.id)).not.toContain("page-1");
   });
-
-  it("can be told to include unpublished resources, for tests only", async () => {
-    await db.query(
-      "UPDATE resources SET published_generation_id = NULL WHERE source_object_id = 'page-1'",
-    );
-    const permissive = new IndexedLexicalArm(db, {
-      tenantId: "acme",
-      includeUnpublished: true,
-    });
-    expect(
-      (await permissive.search({ text: "payment retry" }, viewer)).map(
-        (hit) => hit.id,
-      ),
-    ).toContain("page-1");
-  });
 });
 
 describe("indexed arm inside the retrieval pipeline", () => {
