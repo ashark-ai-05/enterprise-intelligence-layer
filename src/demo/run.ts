@@ -250,6 +250,29 @@ async function main(): Promise<void> {
     );
     console.log(`model: ${localEmbedder.id}; remote model access: none`);
 
+    section("Publication — atomic catalog, ACL, and lexical generations");
+    const publications = await db.query<{
+      resources: string;
+      published: string;
+      projections: string;
+    }>(
+      `SELECT
+        count(DISTINCT r.id)::text AS resources,
+        count(DISTINCT g.id)::text AS published,
+        count(gp.projection)::text AS projections
+       FROM resources r
+       LEFT JOIN index_generations g ON g.id = r.published_generation_id
+       LEFT JOIN generation_projections gp ON gp.generation_id = g.id
+       WHERE r.tenant_id = $1`,
+      [TENANT],
+    );
+    console.log(
+      `${publications.rows[0]?.resources ?? "0"} resource(s), ${publications.rows[0]?.published ?? "0"} published manifest(s), ${publications.rows[0]?.projections ?? "0"} ready projections`,
+    );
+    console.log(
+      "incomplete manifests never replace the current published generation",
+    );
+
     section("Reconciliation — a source-side deletion, detected by ID diff");
     const confluenceConnectorAfterDeletion = new StubConfluenceConnector([
       confluenceEvent(
@@ -441,7 +464,9 @@ async function main(): Promise<void> {
     console.log(
       "         offline WASM embeddings, changed-chunk vectors, rank fusion,",
     );
-    console.log("         diversity cap, doctor checks");
+    console.log(
+      "         atomic publication, auditable deletion lifecycle, diversity cap, doctor checks",
+    );
     console.log(
       "stub:    Confluence/Jira source data above — no live connector has landed yet",
     );

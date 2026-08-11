@@ -10,6 +10,10 @@ import {
 } from "../connectors/types.js";
 import { normalizerFor } from "../normalization/normalizers.js";
 import { replaceResourceChunks } from "../normalization/persist.js";
+import {
+  publishCoreGenerationInTransaction,
+  supersedePublishedGeneration,
+} from "../publication/generations.js";
 import { getScope, saveScopeCheckpoint } from "../scopes/service.js";
 import type { Source } from "../scopes/types.js";
 import type { Database } from "../storage/database.js";
@@ -160,6 +164,7 @@ async function ingestItem(
         "UPDATE resource_chunks SET deleted_at = now(), updated_at = now() WHERE resource_id = $1",
         [resourceId],
       );
+      await supersedePublishedGeneration(tx, tenantId, resourceId);
       counters.deleted += 1;
       return;
     }
@@ -251,6 +256,7 @@ async function ingestItem(
        VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [resourceId, scopeId],
     );
+    await publishCoreGenerationInTransaction(tx, tenantId, resourceId);
   });
 }
 
