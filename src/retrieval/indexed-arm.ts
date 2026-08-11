@@ -23,37 +23,10 @@ import type {
   Viewer,
 } from "./types.js";
 
-/**
- * Resources whose current version has been published.
- *
- * Publication is what makes a version searchable: an atomically published
- * generation means the catalog, ACL and lexical projections agree. Serving a
- * resource with no published generation means serving a half-written version,
- * or one whose ACL projection has been revoked.
- *
- * `listAuthorizedChunks` does not currently apply this filter, so the arm
- * applies it. It is a separate, trivial query rather than a second copy of the
- * ACL predicate — the constraint that matters is not duplicating *authorization*
- * logic. → docs/15, PR note
- */
-async function publishedResourceIds(
-  db: Database,
-  tenantId: string,
-): Promise<Set<string>> {
-  const result = await db.query<{ id: string }>(
-    `SELECT id FROM resources
-      WHERE tenant_id = $1 AND deleted_at IS NULL AND published_generation_id IS NOT NULL`,
-    [tenantId],
-  );
-  return new Set(result.rows.map((row) => row.id));
-}
-
 export interface IndexedArmOptions {
   readonly tenantId: string;
   /** Arm name; defaults to `lexical-strict` so the query classifier weights it. */
   readonly name?: string;
-  /** Include chunks from unpublished resources. Off by default, and only ever useful in tests. */
-  readonly includeUnpublished?: boolean;
 }
 
 interface ScoredResource {
@@ -138,11 +111,6 @@ export class IndexedLexicalArm implements RetrievalArm {
       query.containers === undefined ? [] : [...query.containers],
     );
 
-    const published =
-      this.options.includeUnpublished === true
-        ? null
-        : await publishedResourceIds(this.db, this.options.tenantId);
-
     // Best chunk per resource. A page with five matching sections is one result,
     // not five — the alternative buries every other document under one verbose
     // page, which is the same failure the source-diversity cap prevents across
@@ -150,7 +118,6 @@ export class IndexedLexicalArm implements RetrievalArm {
     const best = new Map<string, ScoredResource>();
 
     for (const chunk of chunks) {
-      if (published !== null && !published.has(chunk.resourceId)) continue;
       if (
         query.sources !== undefined &&
         query.sources.length > 0 &&

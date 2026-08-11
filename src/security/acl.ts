@@ -189,6 +189,7 @@ export async function listAuthorizedChunks(
      JOIN resources r ON r.id = ch.resource_id
      WHERE r.tenant_id = $1
        AND r.deleted_at IS NULL AND ch.deleted_at IS NULL
+       AND r.published_generation_id IS NOT NULL
        AND r.container_id IS NOT NULL
        AND (cardinality($4::uuid[]) = 0 OR r.container_id = ANY($4::uuid[]))
        AND EXISTS (

@@ -74,6 +74,21 @@ afterEach(async () => {
 });
 
 describe("identity and ACL plane", () => {
+  it("never exposes authorized chunks from an unpublished generation", async () => {
+    await replaceContainerAces(db, "acme", containerId, [
+      { ...engineering, effect: "allow" },
+    ]);
+    expect(await listAuthorizedChunks(db, "acme", [engineering])).toHaveLength(
+      1,
+    );
+
+    await db.query(
+      "UPDATE resources SET published_generation_id = NULL WHERE id = $1",
+      [resourceId],
+    );
+    expect(await listAuthorizedChunks(db, "acme", [engineering])).toEqual([]);
+  });
+
   it("inherits container access and fails closed without an allow", async () => {
     expect(await listAuthorizedChunks(db, "acme", [engineering])).toEqual([]);
     await replaceContainerAces(db, "acme", containerId, [
