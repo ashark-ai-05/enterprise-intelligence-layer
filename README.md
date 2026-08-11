@@ -53,6 +53,7 @@ Everything else follows from these.
 | [11 — Roadmap](docs/11-roadmap.md) | Five phases with explicit exit gates |
 | [12 — Risk register](docs/12-risk-register.md) | What actually kills this, ranked, with mitigations |
 | [13 — System diagram & tech stack](docs/13-system-diagram-and-tech-stack.md) | The whole system on one page, every component's technology and its fallback, and the two extension seams |
+| [14 — Prior art, gaps & pre-build changes](docs/14-prior-art-gaps-and-pre-build-changes.md) | What Onyx, ManifoldCF, Elastic and Sourcegraph already solved; 13 gaps in this design; what to change and what to cut before writing code |
 
 ### Decisions
 | ADR | Decision |
