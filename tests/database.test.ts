@@ -33,12 +33,13 @@ describe("database profiles", () => {
     expect(await migrate(db)).toEqual([
       "0001_foundation.sql",
       "0002_ingestion_pipeline.sql",
+      "0003_structural_chunks.sql",
     ]);
     expect(await migrate(db)).toEqual([]);
     const count = await db.query<{ count: number }>(
       "SELECT count(*)::int AS count FROM schema_migrations",
     );
-    expect(count.rows[0]?.count).toBe(2);
+    expect(count.rows[0]?.count).toBe(3);
   });
 
   it("rejects unsupported database URL schemes", async () => {

@@ -80,6 +80,10 @@ describe("scope ingestion pipeline", () => {
     expect(resource.rows[0]?.acl_hash).toHaveLength(64);
     expect((await db.query("SELECT * FROM raw_source_items")).rowCount).toBe(1);
     expect((await db.query("SELECT * FROM resource_aces")).rowCount).toBe(1);
+    expect(
+      (await db.query("SELECT * FROM resource_chunks WHERE deleted_at IS NULL"))
+        .rowCount,
+    ).toBe(1);
     expect((await listScopes(db, "acme"))[0]?.cursor).toEqual({ sequence: 1 });
   });
 
@@ -157,6 +161,10 @@ describe("scope ingestion pipeline", () => {
     );
     expect(resource.rows[0]?.deleted).toBe(true);
     expect((await db.query("SELECT * FROM resource_aces")).rowCount).toBe(0);
+    expect(
+      (await db.query("SELECT * FROM resource_chunks WHERE deleted_at IS NULL"))
+        .rowCount,
+    ).toBe(0);
   });
 
   it("does not advance the scope checkpoint when a connector or item fails", async () => {
@@ -173,6 +181,30 @@ describe("scope ingestion pipeline", () => {
       "SELECT status, error_code FROM ingestion_runs",
     );
     expect(run.rows).toEqual([{ status: "failed", error_code: "ZodError" }]);
+  });
+
+  it("rejects duplicate structural keys instead of silently dropping a chunk", async () => {
+    if (!db) throw new Error("test database was not initialized");
+    const connector = new StubConfluenceConnector([
+      {
+        sequence: 1,
+        item: page("1", {
+          metadata: {
+            pageId: "1",
+            spaceKey: "ARCH",
+            sections: [
+              { anchor: "duplicate", text: "First" },
+              { anchor: "duplicate", text: "Second" },
+            ],
+          },
+        }),
+      },
+    ]);
+    await expect(ingestScope(db, "acme", scopeId, connector)).rejects.toThrow(
+      "normalizer produced duplicate stable chunk keys",
+    );
+    expect((await listScopes(db, "acme"))[0]?.cursor).toBeNull();
+    expect((await db.query("SELECT * FROM resources")).rowCount).toBe(0);
   });
 
   it("deduplicates repeated ACL entries before persistence and hashing", async () => {

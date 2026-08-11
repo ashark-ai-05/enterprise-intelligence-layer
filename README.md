@@ -23,6 +23,11 @@ The first foundation slice provides:
   same scope selectors the live adapters will implement;
 - immutable raw acquisition, independent content/metadata/ACL change gates,
   tombstones, per-run audit, and checkpoint-on-success ingestion.
+- source-specific structural normalization for Confluence sections, Jira
+  descriptions/comments, code symbols/line windows, and document pages;
+- sparse chunk-level ACL overlays for restricted Jira comments;
+- ID-only, scope-bounded reconciliation that preserves resources still covered
+  by another selected scope.
 
 ```bash
 pnpm install
