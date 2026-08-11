@@ -262,6 +262,27 @@ export async function completeJob(
   );
 }
 
+export async function deferJob(
+  db: Database,
+  job: Pick<Job, "id" | "tenantId" | "leaseOwner" | "fenceToken">,
+  runAfter: Date,
+  reason: string,
+): Promise<Job> {
+  if (!job.leaseOwner) throw new Error("job has no lease owner");
+  if (Number.isNaN(runAfter.getTime()))
+    throw new Error("runAfter must be valid");
+  return fencedUpdate(
+    db,
+    job.id,
+    job.tenantId,
+    job.leaseOwner,
+    job.fenceToken,
+    `status = 'pending', attempts = GREATEST(attempts - 1, 0), run_after = $5,
+     last_error = $6, lease_owner = NULL, lease_expires_at = NULL`,
+    [runAfter.toISOString(), reason.slice(0, 2_000)],
+  );
+}
+
 export async function failJob(
   db: Database,
   job: Pick<Job, "id" | "tenantId" | "leaseOwner" | "fenceToken">,

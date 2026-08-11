@@ -11,10 +11,12 @@ import type { Database } from "../storage/database.js";
 import {
   claimJob,
   completeJob,
+  deferJob,
   enqueueJob,
   failJob,
   saveJobCheckpoint,
 } from "./queue.js";
+import { acquireSourceRatePermit } from "./scheduler.js";
 
 const payloadSchema = z.object({
   scopeId: z.string().uuid(),
@@ -95,6 +97,16 @@ export async function runNextScopeJob(
     }
     const scope = await getScope(db, tenantId, payload.scopeId);
     if (!scope.enabled) throw new Error(`scope is disabled: ${scope.id}`);
+    const permit = await acquireSourceRatePermit(db, tenantId, scope.source);
+    if (!permit.allowed) {
+      const deferred = await deferJob(
+        db,
+        job,
+        permit.retryAt ?? new Date(Date.now() + 1_000),
+        `source rate budget exhausted: ${scope.source}`,
+      );
+      return { jobId: job.id, status: deferred.status as "pending" };
+    }
     const connector = await connectors.resolve(scope);
     const checkpoint =
       job.checkpoint === null ? null : checkpointSchema.parse(job.checkpoint);

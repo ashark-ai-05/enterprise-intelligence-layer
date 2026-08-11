@@ -41,12 +41,13 @@ describe("database profiles", () => {
       "0008_lexical_projection.sql",
       "0009_resource_links.sql",
       "0010_job_control_plane.sql",
+      "0011_scheduling_and_rate_budgets.sql",
     ]);
     expect(await migrate(db)).toEqual([]);
     const count = await db.query<{ count: number }>(
       "SELECT count(*)::int AS count FROM schema_migrations",
     );
-    expect(count.rows[0]?.count).toBe(10);
+    expect(count.rows[0]?.count).toBe(11);
   });
 
   it("rejects unsupported database URL schemes", async () => {
