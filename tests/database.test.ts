@@ -37,12 +37,13 @@ describe("database profiles", () => {
       "0004_acl_identity_plane.sql",
       "0005_many_to_many_principal_mappings.sql",
       "0006_chunk_vectors.sql",
+      "0007_publication_and_deletion.sql",
     ]);
     expect(await migrate(db)).toEqual([]);
     const count = await db.query<{ count: number }>(
       "SELECT count(*)::int AS count FROM schema_migrations",
     );
-    expect(count.rows[0]?.count).toBe(6);
+    expect(count.rows[0]?.count).toBe(7);
   });
 
   it("rejects unsupported database URL schemes", async () => {

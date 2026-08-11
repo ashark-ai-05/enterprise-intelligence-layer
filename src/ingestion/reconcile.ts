@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SourceConnector } from "../connectors/types.js";
+import { supersedePublishedGeneration } from "../publication/generations.js";
 import { getScope } from "../scopes/service.js";
 import type { Database } from "../storage/database.js";
 import { withTransaction } from "../storage/database.js";
@@ -72,6 +73,7 @@ export async function reconcileScope(
           "UPDATE resource_chunks SET deleted_at = now(), updated_at = now() WHERE resource_id = $1",
           [resourceId],
         );
+        await supersedePublishedGeneration(tx, tenantId, resourceId);
         counters.tombstoned += 1;
       }
     }
