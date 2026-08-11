@@ -54,6 +54,7 @@ Everything else follows from these.
 | [12 — Risk register](docs/12-risk-register.md) | What actually kills this, ranked, with mitigations |
 | [13 — System diagram & tech stack](docs/13-system-diagram-and-tech-stack.md) | The whole system on one page, every component's technology and its fallback, and the two extension seams |
 | [14 — Prior art, gaps & pre-build changes](docs/14-prior-art-gaps-and-pre-build-changes.md) | What Onyx, ManifoldCF, Elastic and Sourcegraph already solved; 13 gaps in this design; what to change and what to cut before writing code |
+| [15 — Open questions & delivery plan](docs/15-open-questions-and-delivery-plan.md) | The revised eight-plane architecture, 26 open questions each with a recommended default, and 71 tasks with sizes, dependencies and the critical path ([`tasks/TASKS.tsv`](tasks/TASKS.tsv)) |
 
 ### Decisions
 | ADR | Decision |
