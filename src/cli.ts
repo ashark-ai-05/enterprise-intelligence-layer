@@ -13,11 +13,13 @@ import {
   runDoctor,
 } from "./doctor/checks.js";
 import { installGlobalProxy } from "./net/proxy.js";
+import { serveMcp } from "./serving/serve.js";
 
 const USAGE = `eil — Enterprise Intelligence Layer
 
 Usage:
   eil doctor [--json]     Run the constraint checklist and report evidence
+  eil serve               Serve the MCP tool surface over stdio
 
 Environment:
   EIL_CONFLUENCE_URL      probed for reachability
@@ -88,6 +90,11 @@ async function main(argv: readonly string[]): Promise<number> {
     }
 
     return report.failed > 0 ? 1 : 0;
+  }
+
+  if (command === "serve") {
+    await serveMcp();
+    return 0;
   }
 
   process.stderr.write(`Unknown command: ${argv.join(" ")}\n\n${USAGE}`);
