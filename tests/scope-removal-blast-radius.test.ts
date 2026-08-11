@@ -44,22 +44,19 @@ describe("scope removal blast radius", () => {
 
     // Deliberately retain A's resource.
     await removeScope(db, "t1", a.id, "retain");
-    let { rows } = await db.query(
+    let { rows } = await db.query<{ source_object_id: string }>(
       "SELECT source_object_id FROM resources ORDER BY source_object_id",
     );
-    expect(rows.map((r: any) => r.source_object_id)).toEqual([
-      "page-a",
-      "page-b",
-    ]);
+    expect(rows.map((r) => r.source_object_id)).toEqual(["page-a", "page-b"]);
 
     // Now purge an unrelated scope.
     await removeScope(db, "t1", b.id, "purge");
-    ({ rows } = await db.query(
+    ({ rows } = await db.query<{ source_object_id: string }>(
       "SELECT source_object_id FROM resources ORDER BY source_object_id",
     ));
     await db.close();
 
     // page-a was explicitly retained and belongs to a different scope.
-    expect(rows.map((r: any) => r.source_object_id)).toEqual(["page-a"]);
+    expect(rows.map((r) => r.source_object_id)).toEqual(["page-a"]);
   });
 });
