@@ -98,6 +98,20 @@ export async function listScopes(
   return result.rows.map(scopeFromRow);
 }
 
+export async function getScope(
+  db: Database,
+  tenantId: string,
+  scopeId: string,
+): Promise<IngestionScope> {
+  const result = await db.query<ScopeRow>(
+    `SELECT ${scopeColumns} FROM ingestion_scopes WHERE id = $1 AND tenant_id = $2`,
+    [scopeId, tenantId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error(`unknown scope: ${scopeId}`);
+  return scopeFromRow(row);
+}
+
 export async function saveScopeCheckpoint(
   db: Database,
   tenantId: string,

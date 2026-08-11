@@ -19,6 +19,10 @@ The first foundation slice provides:
 - independent per-scope cursors and refresh modes;
 - resource deduplication across overlapping scopes;
 - explicit retain-versus-purge removal with tenant-bound mutations.
+- fixture-backed Confluence, Jira, Git/Bitbucket, and file connectors using the
+  same scope selectors the live adapters will implement;
+- immutable raw acquisition, independent content/metadata/ACL change gates,
+  tombstones, per-run audit, and checkpoint-on-success ingestion.
 
 ```bash
 pnpm install

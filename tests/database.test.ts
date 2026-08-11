@@ -30,12 +30,15 @@ describe("database profiles", () => {
   it("applies each migration once", async () => {
     const directory = await mkdtemp(join(tmpdir(), "eil-migrate-"));
     db = await openDatabase({ url: `pglite://${directory}/catalog` });
-    expect(await migrate(db)).toEqual(["0001_foundation.sql"]);
+    expect(await migrate(db)).toEqual([
+      "0001_foundation.sql",
+      "0002_ingestion_pipeline.sql",
+    ]);
     expect(await migrate(db)).toEqual([]);
     const count = await db.query<{ count: number }>(
       "SELECT count(*)::int AS count FROM schema_migrations",
     );
-    expect(count.rows[0]?.count).toBe(1);
+    expect(count.rows[0]?.count).toBe(2);
   });
 
   it("rejects unsupported database URL schemes", async () => {
