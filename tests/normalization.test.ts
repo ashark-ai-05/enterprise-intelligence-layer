@@ -13,6 +13,7 @@ function item(
     title: "Item",
     body,
     metadata,
+    links: [],
     acl: [],
     sourceUpdatedAt: "2026-08-11T00:00:00Z",
     deleted: false,

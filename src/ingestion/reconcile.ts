@@ -73,6 +73,10 @@ export async function reconcileScope(
           "UPDATE resource_chunks SET deleted_at = now(), updated_at = now() WHERE resource_id = $1",
           [resourceId],
         );
+        await tx.query(
+          "DELETE FROM resource_links WHERE from_resource_id = $1",
+          [resourceId],
+        );
         await supersedePublishedGeneration(tx, tenantId, resourceId);
         counters.tombstoned += 1;
       }

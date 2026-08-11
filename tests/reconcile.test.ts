@@ -13,7 +13,7 @@ function page(id: string, deleted = false): SourceItem {
     sourceVersion: deleted ? "2" : "1",
     canonicalUri: `https://example.atlassian.net/wiki/pages/${id}`,
     title: `Page ${id}`,
-    body: `Body ${id}`,
+    body: `Body ${id}; follow PAY-1.`,
     metadata: { pageId: id, spaceKey: "ARCH" },
     acl: [{ domain: "atlassian", principalId: "engineering", effect: "allow" }],
     sourceUpdatedAt: "2026-08-11T00:00:00Z",
@@ -66,6 +66,10 @@ describe("ID-only bounded reconciliation", () => {
       { source_object_id: "1", deleted: false },
       { source_object_id: "2", deleted: true },
     ]);
+    const deletedLinks = await db.query(
+      "SELECT 1 FROM resource_links WHERE from_source_object_id = '2'",
+    );
+    expect(deletedLinks.rowCount).toBe(0);
   });
 
   it("detaches but preserves a resource still covered by another scope", async () => {

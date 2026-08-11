@@ -32,3 +32,5 @@ export * from "./eval/corpus-gate.js";
 export * from "./retrieval/graph-arm.js";
 export * from "./retrieval/authorized-resolver.js";
 export * from "./retrieval/principals.js";
+export * from "./links/extract.js";
+export * from "./links/store.js";

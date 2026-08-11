@@ -35,12 +35,13 @@ export class AuthorizedHitResolver implements HitResolver {
   ): Promise<RetrievalHit[]> {
     if (sourceObjectIds.length === 0) return [];
 
-    const wanted = new Set(sourceObjectIds);
     const chunks = await listAuthorizedChunks(
       this.db,
       this.tenantId,
       toPrincipalRefs(viewer.principals),
       query.containers === undefined ? [] : [...query.containers],
+      undefined,
+      sourceObjectIds,
     );
 
     // First chunk per resource is enough: expansion answers "this exists and is
@@ -49,8 +50,7 @@ export class AuthorizedHitResolver implements HitResolver {
     const hits: RetrievalHit[] = [];
 
     for (const chunk of chunks) {
-      if (!wanted.has(chunk.sourceObjectId) || seen.has(chunk.sourceObjectId))
-        continue;
+      if (seen.has(chunk.sourceObjectId)) continue;
       if (
         query.sources !== undefined &&
         query.sources.length > 0 &&

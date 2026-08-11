@@ -8,6 +8,8 @@ import {
   connectorCursorSchema,
   sourceItemSchema,
 } from "../connectors/types.js";
+import { extractResourceLinks } from "../links/extract.js";
+import { replaceResourceLinks } from "../links/store.js";
 import { normalizerFor } from "../normalization/normalizers.js";
 import { replaceResourceChunks } from "../normalization/persist.js";
 import {
@@ -164,6 +166,9 @@ async function ingestItem(
         "UPDATE resource_chunks SET deleted_at = now(), updated_at = now() WHERE resource_id = $1",
         [resourceId],
       );
+      await tx.query("DELETE FROM resource_links WHERE from_resource_id = $1", [
+        resourceId,
+      ]);
       await supersedePublishedGeneration(tx, tenantId, resourceId);
       counters.deleted += 1;
       return;
@@ -255,6 +260,15 @@ async function ingestItem(
       `INSERT INTO resource_scopes (resource_id, scope_id)
        VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [resourceId, scopeId],
+    );
+    await replaceResourceLinks(
+      tx,
+      tenantId,
+      resourceId,
+      source,
+      item.sourceObjectId,
+      item.sourceVersion,
+      extractResourceLinks(source, item),
     );
     await publishCoreGenerationInTransaction(tx, tenantId, resourceId);
   });
