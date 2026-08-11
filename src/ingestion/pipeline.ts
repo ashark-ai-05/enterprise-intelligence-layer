@@ -8,6 +8,7 @@ import {
   connectorCursorSchema,
   sourceItemSchema,
 } from "../connectors/types.js";
+import { type JobLease, assertActiveJobLease } from "../jobs/queue.js";
 import { extractResourceLinks } from "../links/extract.js";
 import { replaceResourceLinks } from "../links/store.js";
 import { normalizerFor } from "../normalization/normalizers.js";
@@ -88,6 +89,7 @@ async function ingestItem(
   source: Source,
   item: ValidatedSourceItem,
   counters: IngestionCounters,
+  lease?: JobLease,
 ): Promise<void> {
   const rawPayload = stableJson(item);
   const rawHash = sha256(rawPayload);
@@ -103,6 +105,7 @@ async function ingestItem(
   const aclHash = sha256(stableJson(aces));
 
   await withTransaction(db, async (tx) => {
+    if (lease !== undefined) await assertActiveJobLease(tx, lease);
     await tx.query(
       `INSERT INTO raw_source_items (
         id, tenant_id, scope_id, source, source_object_id, source_version, payload, payload_hash
@@ -279,6 +282,7 @@ export async function ingestScope(
   tenantId: string,
   scopeId: string,
   connector: SourceConnector,
+  lease?: JobLease,
 ): Promise<IngestionCounters> {
   const scope = await getScope(db, tenantId, scopeId);
   if (!scope.enabled) throw new Error(`scope is disabled: ${scopeId}`);
@@ -303,9 +307,24 @@ export async function ingestScope(
     counters.discovered = batch.items.length;
     for (const candidate of batch.items) {
       const item = sourceItemSchema.parse(candidate);
-      await ingestItem(db, tenantId, scopeId, connector.source, item, counters);
+      await ingestItem(
+        db,
+        tenantId,
+        scopeId,
+        connector.source,
+        item,
+        counters,
+        lease,
+      );
     }
-    await saveScopeCheckpoint(db, tenantId, scopeId, batch.nextCursor);
+    if (lease === undefined) {
+      await saveScopeCheckpoint(db, tenantId, scopeId, batch.nextCursor);
+    } else {
+      await withTransaction(db, async (tx) => {
+        await assertActiveJobLease(tx, lease);
+        await saveScopeCheckpoint(tx, tenantId, scopeId, batch.nextCursor);
+      });
+    }
     await db.query(
       `UPDATE ingestion_runs
        SET status = 'succeeded', counters = $2::jsonb, finished_at = now()
