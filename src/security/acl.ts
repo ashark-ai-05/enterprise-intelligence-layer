@@ -167,10 +167,12 @@ export async function listAuthorizedChunks(
   tenantId: string,
   principals: PrincipalRef[],
   containerIds: string[] = [],
+  lexicalQuery?: string,
 ): Promise<AuthorizedChunk[]> {
   if (principals.length === 0) return [];
   const domains = principals.map(({ domain }) => domain);
   const ids = principals.map(({ principalId }) => principalId);
+  const normalizedQuery = lexicalQuery?.trim() || null;
   const result = await db.query<{
     chunk_id: string;
     resource_id: string;
@@ -192,6 +194,13 @@ export async function listAuthorizedChunks(
        AND r.published_generation_id IS NOT NULL
        AND r.container_id IS NOT NULL
        AND (cardinality($4::uuid[]) = 0 OR r.container_id = ANY($4::uuid[]))
+       AND (
+         $5::text IS NULL
+         OR ch.search_vector @@ to_tsquery(
+           'simple',
+           array_to_string(tsvector_to_array(to_tsvector('simple', $5)), ' | ')
+         )
+       )
        AND EXISTS (
          SELECT 1 FROM container_aces ca
          WHERE ca.container_id = r.container_id AND ca.effect = 'allow'
@@ -241,7 +250,7 @@ export async function listAuthorizedChunks(
          )
        )
      ORDER BY r.source, r.source_object_id, ch.ordinal`,
-    [tenantId, domains, ids, containerIds],
+    [tenantId, domains, ids, containerIds, normalizedQuery],
   );
   return result.rows.map((row) => ({
     chunkId: row.chunk_id,
@@ -264,7 +273,14 @@ export async function listAuthorizedChunksForSubject(
   tenantId: string,
   subject: string,
   containerIds: string[] = [],
+  lexicalQuery?: string,
 ): Promise<AuthorizedChunk[]> {
   const principals = await resolveViewerPrincipals(db, tenantId, subject);
-  return listAuthorizedChunks(db, tenantId, principals, containerIds);
+  return listAuthorizedChunks(
+    db,
+    tenantId,
+    principals,
+    containerIds,
+    lexicalQuery,
+  );
 }

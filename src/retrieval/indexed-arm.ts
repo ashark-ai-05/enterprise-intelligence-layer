@@ -109,6 +109,7 @@ export class IndexedLexicalArm implements RetrievalArm {
       this.options.tenantId,
       principals,
       query.containers === undefined ? [] : [...query.containers],
+      query.text,
     );
 
     // Best chunk per resource. A page with five matching sections is one result,
