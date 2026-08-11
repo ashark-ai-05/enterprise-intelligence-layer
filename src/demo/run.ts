@@ -27,6 +27,7 @@ import { runDoctor } from "../doctor/checks.js";
 import { applyDiversityCap, rrf } from "../fusion/rrf.js";
 import type { Arm } from "../fusion/rrf.js";
 import { ingestScope } from "../ingestion/pipeline.js";
+import { reconcileScope } from "../ingestion/reconcile.js";
 import { createScope, listScopes } from "../scopes/service.js";
 import type { Database } from "../storage/database.js";
 import { detectCapabilities, openDatabase } from "../storage/database.js";
@@ -74,12 +75,21 @@ function confluenceEvent(
   };
 }
 
+interface JiraComment {
+  id: string;
+  body: string;
+  author?: string;
+  /** Presence of visibility is what triggers a chunk-level ACL overlay. */
+  visibility?: { domain: string; principalId: string };
+}
+
 function jiraEvent(
   sequence: number,
   issueKey: string,
   projectKey: string,
   title: string,
   body: string,
+  comments: JiraComment[] = [],
 ): StubEvent {
   return {
     sequence,
@@ -89,7 +99,7 @@ function jiraEvent(
       canonicalUri: `https://example.atlassian.net/browse/${issueKey}`,
       title,
       body,
-      metadata: { issueKey, projectKey },
+      metadata: { issueKey, projectKey, comments },
       acl: [
         {
           domain: "jira",
@@ -164,6 +174,18 @@ async function main(): Promise<void> {
         "PAY",
         "Payment retries fail silently under load",
         "Retries dropped after 3 attempts",
+        [
+          { id: "c1", body: "Reproduced on staging.", author: "alice" },
+          {
+            id: "c2",
+            body: "Root cause is a support-only detail — do not surface to the reporter.",
+            author: "bob",
+            visibility: {
+              domain: "jira-role",
+              principalId: "Service Desk Team",
+            },
+          },
+        ],
       ),
     ]);
     const confluenceCounters = await ingestScope(
@@ -180,6 +202,65 @@ async function main(): Promise<void> {
     );
     console.log(`confluence: ${JSON.stringify(confluenceCounters)}`);
     console.log(`jira: ${JSON.stringify(jiraCounters)}`);
+
+    section("Structural chunks — real normalizer output, stored per resource");
+    const chunkSummary = await db.query<{
+      source: string;
+      kind: string;
+      count: string;
+    }>(
+      `SELECT r.source, rc.kind, count(*)::text AS count
+       FROM resource_chunks rc
+       JOIN resources r ON r.id = rc.resource_id
+       WHERE r.tenant_id = $1 AND rc.deleted_at IS NULL
+       GROUP BY r.source, rc.kind
+       ORDER BY r.source, rc.kind`,
+      [TENANT],
+    );
+    for (const row of chunkSummary.rows) {
+      console.log(`${row.source}: ${row.count} ${row.kind} chunk(s)`);
+    }
+    const overlayCount = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM chunk_aces ca
+       JOIN resource_chunks rc ON rc.id = ca.chunk_id
+       JOIN resources r ON r.id = rc.resource_id
+       WHERE r.tenant_id = $1`,
+      [TENANT],
+    );
+    console.log(
+      `chunk-level ACL overlays: ${overlayCount.rows[0]?.count ?? "0"} (the restricted Jira comment above, not inherited from the issue)`,
+    );
+
+    section("Reconciliation — a source-side deletion, detected by ID diff");
+    const confluenceConnectorAfterDeletion = new StubConfluenceConnector([
+      confluenceEvent(
+        1,
+        "12345",
+        "PAY",
+        "Payment Retry Runbook",
+        "How to handle payment retries",
+      ),
+      // "Payment Architecture Overview" (12399) is gone — simulates the
+      // source deleting or moving it out of scope between polls.
+    ]);
+    const reconciliation = await reconcileScope(
+      db,
+      TENANT,
+      confluenceScope.id,
+      confluenceConnectorAfterDeletion,
+    );
+    console.log(`reconciliation: ${JSON.stringify(reconciliation)}`);
+    const remainingChunks = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM resource_chunks rc
+       JOIN resources r ON r.id = rc.resource_id
+       WHERE r.tenant_id = $1 AND r.source = 'confluence' AND rc.deleted_at IS NULL`,
+      [TENANT],
+    );
+    console.log(
+      `confluence chunks remaining after reconciliation: ${remainingChunks.rows[0]?.count ?? "0"} (tombstoned, not deleted — recoverable until a real purge)`,
+    );
 
     section("Rank fusion — same module that will fuse real search arms");
     const { rows } = await db.query<{
@@ -232,8 +313,12 @@ async function main(): Promise<void> {
 
     section("Roadmap — what's real above, what's still stubbed");
     console.log(
-      "real:    storage (PGlite), scope registry, ingestion pipeline (hashing/ACL/checkpoints), rank fusion, diversity cap, doctor checks",
+      "real:    storage (PGlite), scope registry, ingestion pipeline (hashing/ACL/checkpoints),",
     );
+    console.log(
+      "         structural chunking, chunk-level ACL overlays, ID-diff reconciliation,",
+    );
+    console.log("         rank fusion, diversity cap, doctor checks");
     console.log(
       "stub:    Confluence/Jira source data above — no live connector has landed yet",
     );
