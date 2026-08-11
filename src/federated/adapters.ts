@@ -180,15 +180,15 @@ export function adaptersFromEnv(
 ): SourceAdapter[] {
   const adapters: SourceAdapter[] = [];
 
-  const confluenceUrl = env["EIL_CONFLUENCE_URL"];
-  const confluenceToken = env["EIL_CONFLUENCE_TOKEN"];
+  const confluenceUrl = env.EIL_CONFLUENCE_URL;
+  const confluenceToken = env.EIL_CONFLUENCE_TOKEN;
   if (confluenceUrl !== undefined && confluenceToken !== undefined) {
     adapters.push(
       new ConfluenceAdapter(
         {
           baseUrl: confluenceUrl,
           authToken: confluenceToken,
-          spaceKeys: (env["EIL_CONFLUENCE_SPACES"] ?? "")
+          spaceKeys: (env.EIL_CONFLUENCE_SPACES ?? "")
             .split(",")
             .filter(Boolean),
         },
@@ -197,17 +197,15 @@ export function adaptersFromEnv(
     );
   }
 
-  const jiraUrl = env["EIL_JIRA_URL"];
-  const jiraToken = env["EIL_JIRA_TOKEN"];
+  const jiraUrl = env.EIL_JIRA_URL;
+  const jiraToken = env.EIL_JIRA_TOKEN;
   if (jiraUrl !== undefined && jiraToken !== undefined) {
     adapters.push(
       new JiraAdapter(
         {
           baseUrl: jiraUrl,
           authToken: jiraToken,
-          projectKeys: (env["EIL_JIRA_PROJECTS"] ?? "")
-            .split(",")
-            .filter(Boolean),
+          projectKeys: (env.EIL_JIRA_PROJECTS ?? "").split(",").filter(Boolean),
         },
         fetchImpl,
       ),
