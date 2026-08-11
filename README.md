@@ -4,8 +4,31 @@ One index across Confluence, Jira, Bitbucket, code, notes and PDFs. Hybrid
 lexical + semantic retrieval. Delta ingestion. ACL-correct at query time.
 Runs behind a corporate proxy with no admin rights on the machine.
 
-This repository is **design only**. No implementation code. It exists to be
-argued with before anything is built.
+The phased implementation is now underway. Architecture documents remain the
+decision record; executable code lands only after its milestone acceptance
+suite passes.
+
+## Implementation status
+
+The first foundation slice provides:
+
+- embedded PGlite by default and hosted PostgreSQL through `DATABASE_URL`;
+- one extension-free migration chain and database contract;
+- conservative runtime capability detection;
+- explicitly allowlisted Confluence, Jira, Git/Bitbucket, and file scopes;
+- independent per-scope cursors and refresh modes;
+- resource deduplication across overlapping scopes;
+- explicit retain-versus-purge removal with tenant-bound mutations.
+
+```bash
+pnpm install
+pnpm check
+```
+
+`pnpm check` runs formatting/lint, strict TypeScript, the full PGlite
+integration suite, and a production build. Hosted PostgreSQL acceptance will
+be added when a test instance is available; no server-only capability is
+assumed by the embedded profile.
 
 ---
 
