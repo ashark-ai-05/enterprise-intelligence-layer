@@ -1,0 +1,80 @@
+id	phase	title	size	depends
+P0-1	P0	Run the 9-item constraint checklist (ADR-0009); record each as fact + evidence	M
+P0-2	P0	MaaS capability probe: embeddings, dims, batch, rate limit, retention terms	S
+P0-3	P0	Corpus census: pages, issues, repos, bytes, changes/day	S	P0-1
+P0-4	P0	Repo scaffold: pnpm workspaces, TS, vitest, .npmrc to internal mirror	S	P0-1
+P0-5	P0	ProxyAgent global dispatcher + NO_PROXY + NODE_EXTRA_CA_CERTS; smoke test four hosts	S	P0-4
+P0-6	P0	Federated search: Confluence CQL + Jira JQL clients	M	P0-5
+P0-7	P0	RRF fusion module, pure and unit-tested	S	P0-4
+P0-8	P0	MCP stdio server exposing search_enterprise	M	P0-6,P0-7
+P0-9	P0	Query, result and zero-result logging to a local file	S	P0-8
+P0-10	P0	Wire into Amp and Copilot; dogfood for a week	S	P0-8
+P0-11	P0	Start works-council/DPIA and service-account conversations	S
+P1-1	P1	Schema v1 + SQL migration runner (scopes, document_scopes, capabilities)	M	P0-10
+P1-2	P1	ACL by reference: container_aces / document_aces / chunk_aces + visibility function	L	P1-1
+P1-3	P1	principal_map + (authorization_domain, identifier) principals; unmapped implies DENY	L	P1-1
+P1-4	P1	Directory group expansion + 5-minute cache	M	P1-3
+P1-5	P1	Confluence authority resolver: space perms, restriction chains, ancestor walk	L	P1-3
+P1-6	P1	Job queue: SKIP LOCKED + fenced leases + backoff + DLQ	M	P1-1
+P1-7	P1	Connector interface: load / poll / slim / authority, with checkpointing	M	P1-6
+P1-8	P1	Confluence connector: content, body.storage, macro handling table	L	P1-7,P1-5
+P1-9	P1	Heading-aware prose chunker	M	P1-8
+P1-10	P1	Lexical arms 1-2 (tsvector + GIN) with ACL predicate composed into the SQL	M	P1-2,P1-9
+P1-11	P1	Snippet generation for returned page only, never candidates	S	P1-10
+P1-12	P1	callTool dispatch + audit row per read + search_docs/get_doc	M	P1-10
+P1-13	P1	ACL red-team suite: restricted page, re-parent, restricted comment, group removal, unmapped principal, deleted user	L	P1-2,P1-3
+P1-14	P1	Link-graph label harvest into first golden set	M	P1-8
+P1-15	P1	Eval harness + recall@10 and p95 report	M	P1-14
+P1-16	P1	Thumbs up/down + zero-result capture feeding the golden set	S	P1-12
+P1-17	P1	Alias dictionary from space/project/repo names + query expansion	M	P1-8
+P1-18	P1	Secret scanning before anything becomes searchable	M	P1-8
+P1-19	P1	Query-audit privacy: separate retention and restricted grant	S	P1-12
+P2-1	P2	Three-hash gate: content / meta / ACL, three outcomes	L	P1-13
+P2-2	P2	Cursor discipline: advance only after batch commit, with overlap window	M	P2-1
+P2-3	P2	slim() reconciliation sweep, deletion by set difference	M	P2-1
+P2-4	P2	Tombstones, purge and retention matrix	M	P2-3
+P2-5	P2	User-centric permission sync + staleness scheduler + rate-limited queue	L	P1-3
+P2-6	P2	Jira connector + authority: permission scheme to roles to members, issue security levels	L	P1-7
+P2-7	P2	Jira comment-level ACEs into chunk_aces	M	P2-6,P1-2
+P2-8	P2	Jira thread-aware chunker	M	P2-6
+P2-9	P2	File-share / PDF connector (pdfjs-dist, mammoth, exceljs) + quarantine path	L	P1-7
+P2-10	P2	Link extraction: issue keys in commits, Confluence links, page to attachment	M	P2-6
+P2-11	P2	Graph expansion arm	M	P2-10
+P2-12	P2	Source-diversity cap in fusion	S	P1-10
+P2-13	P2	Operator surface: freshness, coverage, lag, DLQ, quarantine, pause/kill, doctor	L	P2-2
+P2-14	P2	Demote federation to a flag; add nightly ACL drift job	M	P2-5
+P3-1	P3	Embedder interface + local ONNX implementation + WASM fallback	L	P2-14
+P3-2	P3	MaaS Embedder implementation for query-time embeddings	M	P3-1,P0-2
+P3-3	P3	Vector storage with model id stamped per vector	M	P3-1
+P3-4	P3	Exact vector scan with container pre-filter (funnel deferred until >1M chunks)	M	P3-3
+P3-5	P3	Backfill lane: checkpointed, off-peak, restartable	M	P3-4
+P3-6	P3	Semantic arm with container pre-filter first	M	P3-4
+P3-7	P3	Golden set to 300 pairs; CI regression gate	M	P1-15
+P3-8	P3	Hand-built BM25 (lexeme_stats, corpus_stats, len) after the eval gate exists	L	P3-7
+P3-9	P3	Recency / tier / validity modifiers; owner-attested freshness	M	P3-7
+P3-10	P3	Index aliasing for embedding-model migration	M	P3-3
+P4-1	P4	Bare-mirror git sync; per-repo cursor is last indexed SHA	M	P3-6
+P4-2	P4	Tree-diff delta; force-push and non-ancestor reconcile	M	P4-1
+P4-3	P4	Blob-SHA content addressing + (repo,path,commit) pointer table	M	P4-1
+P4-4	P4	Exclusion policy: vendor, generated, minified, LFS, huge files; per-repo overridable	S	P4-1
+P4-5	P4	web-tree-sitter symbol chunker	L	P4-3
+P4-6	P4	Code lexical arm: identifier-aware tokenizer, pg_trgm where available	L	P4-5
+P4-7	P4	Symbol/reference index; SCIP/LSIF ingest where CI emits it	L	P4-5
+P4-8	P4	Repo-level ACL via the same container machinery as spaces	M	P1-2
+P4-9	P4	search_code / get_code with citations pinned to exact commit SHA	M	P4-6
+P4-10	P4	Query router: identifier, path, regex, natural language	M	P4-6,P4-7
+P5-1	P5	OIDC bearer + jose JWKS; remove local-viewer constructor from the code path	M	P4-9
+P5-2	P5	MCP streamable-HTTP + REST /v1 adapters over the same callTool	M	P5-1
+P5-3	P5	React + Vite SPA served by the API process	L	P5-2
+P5-4	P5	Read replicas + rpt.* views, aggregate-only	M	P5-1
+P5-5	P5	Per-principal rate limits, timeouts, connection pool sizing	M	P5-2
+P5-6	P5	Injection posture: provenance markers, ingest-time flagging, no-write-loop rule	M	P5-2
+P5-7	P5	Security review and ACL red-team green as the platform-mode entry gate	M	P5-6
+P0-12	P0	Storage port: embedded (PGlite) + server profiles, one schema, capability probe at boot	M	P0-4
+P0-13	P0	eil doctor: executable constraint checklist (proxy, mirror, runtime, db, sources)	M	P0-5
+P1-20	P1	Scope registry: scopes + document_scopes, selectors per source, refcount purge	L	P1-1
+P1-21	P1	Scope CLI + MCP tools: add/list/remove/sync, scope discovery	M	P1-20
+P1-22	P1	Out-of-scope stubs + reference counting as the scope backlog	M	P1-20
+P1-23	P1	on-reference lazy ingestion trigger	S	P1-22
+P2-15	P2	Per-scope cursors, schedules and failure isolation	M	P1-20
+P3-11	P3	db export/import/verify between profiles, exercised in CI	M	P0-12
