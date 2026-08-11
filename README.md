@@ -30,6 +30,25 @@ integration suite, and a production build. Hosted PostgreSQL acceptance will
 be added when a test instance is available; no server-only capability is
 assumed by the embedded profile.
 
+**Try it now:**
+
+```bash
+pnpm demo
+```
+
+Self-contained — an embedded PGlite database in a throwaway temp directory,
+zero external services, zero credentials, zero admin install. It exercises
+real, merged code (storage, scope registry, rank fusion, diversity cap,
+doctor checks) end to end; only the Confluence/Jira *content* is a fixture,
+because no live connector has landed yet. `src/demo/run.ts` is meant to be
+extended rather than rewritten — each fixture block gets swapped for real
+connector/MCP output as that lands, and CI runs the demo on every push/PR so
+it can't silently rot. Runs on any machine with Node 22+; no proxy, no
+network, no corp credentials required.
+
+CI is enabled — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+Every push to `main` and every PR runs `pnpm check` plus the demo smoke test.
+
 ---
 
 ## Read this first

@@ -11,7 +11,8 @@
     "lint:fix": "biome check --write src tests",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "doctor": "pnpm build && node dist/cli.js doctor"
+    "doctor": "pnpm build && node dist/cli.js doctor",
+    "demo": "pnpm build && node dist/demo/run.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
