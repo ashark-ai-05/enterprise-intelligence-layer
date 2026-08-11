@@ -1,113 +1,99 @@
-# Enterprise Intelligence Layer — Architecture
+# Enterprise Intelligence Layer
 
-One index across Confluence, Jira, Bitbucket, code, notes and PDFs. Hybrid
-lexical + semantic retrieval. Delta ingestion. ACL-correct at query time.
-Runs behind a corporate proxy with no admin rights on the machine.
+One index across Confluence, Jira, Bitbucket, and code. Hybrid lexical +
+graph-expansion retrieval, ACL-correct at query time, served over MCP. Built
+to run behind a corporate proxy with no admin rights on the machine.
 
-The phased implementation is now underway. Architecture documents remain the
-decision record; executable code lands only after its milestone acceptance
-suite passes.
+The platform runs end to end today — ingestion, chunking, ACLs, publication,
+retrieval, evaluation, MCP serving — against stub connectors and a synthetic
+corpus. The only thing missing is real Confluence/Jira/Bitbucket source data,
+which is gated entirely on the facts below.
 
-## Implementation status
+---
 
-The first foundation slice provides:
+## Run this on your corp machine
 
-- embedded PGlite by default and hosted PostgreSQL through `DATABASE_URL`;
-- one extension-free migration chain and database contract;
-- conservative runtime capability detection;
-- explicitly allowlisted Confluence, Jira, Git/Bitbucket, and file scopes;
-- independent per-scope cursors and refresh modes;
-- resource deduplication across overlapping scopes;
-- explicit retain-versus-purge removal with tenant-bound mutations.
-- fixture-backed Confluence, Jira, Git/Bitbucket, and file connectors using the
-  same scope selectors the live adapters will implement;
-- immutable raw acquisition, independent content/metadata/ACL change gates,
-  tombstones, per-run audit, and checkpoint-on-success ingestion.
-- source-specific structural normalization for Confluence sections, Jira
-  descriptions/comments, code symbols/line windows, and document pages;
-- sparse chunk-level ACL overlays for restricted Jira comments;
-- ID-only, scope-bounded reconciliation that preserves resources still covered
-  by another selected scope.
+This is the highest-value five minutes available — it settles whether the
+proxy works, whether the package mirror resolves, whether MaaS serves
+embeddings, and it's the gate on swapping stub connectors for real ones.
 
 ```bash
+git clone https://github.com/ashark-ai-05/enterprise-intelligence-layer.git
+cd enterprise-intelligence-layer
 pnpm install
-pnpm check
 ```
-
-`pnpm check` runs formatting/lint, strict TypeScript, the full PGlite
-integration suite, and a production build. Hosted PostgreSQL acceptance will
-be added when a test instance is available; no server-only capability is
-assumed by the embedded profile.
-
-**Try it now:**
 
 ```bash
-pnpm demo           # ~300 objects, ~4s total, what CI runs on every push/PR
-pnpm demo:stress    # ~5,000 objects, ~25s, for a heavier local run
+EIL_CONFLUENCE_URL=https://your-org.atlassian.net/wiki \
+EIL_JIRA_URL=https://your-org.atlassian.net \
+EIL_BITBUCKET_URL=https://your-bitbucket-host \
+EIL_MAAS_URL=https://your-maas-endpoint \
+EIL_MAAS_TOKEN=... \
+pnpm doctor
 ```
 
-Self-contained — an embedded PGlite database in a throwaway temp directory,
-zero external services, zero credentials, zero admin install. It exercises
-real, merged code end to end: storage, scope registry, the real ingestion
-pipeline (hashing, ACL persistence, checkpointing) via `ingestScope`,
-structural chunking with chunk-level ACL overlays (a restricted Jira comment
-stays restricted independent of its issue), offline WASM embeddings via the
-vendored MiniLM model, atomic index-generation publication, ID-diff
-reconciliation via `reconcileScope` (a source-side deletion detaches and
-tombstones, chunks included), principal mapping and container ACLs via
-`src/security/acl.ts` (mapped vs. unmapped subjects, deny-wins fail-closed
-authorization, and immediate access removal on revocation — demonstrated
-with five named subjects, one of whom loses access mid-run), rank fusion,
-diversity cap, doctor checks — then does it all again against
-`src/corpus/synthetic.ts`'s deterministic generated corpus (Confluence pages,
-Jira issues, git repos, cross-source links, relevance judgments, and
-adversarial ACL cases at either a ~300-object `ci` preset or a ~5,000-object
-`stress` preset via `EIL_DEMO_CORPUS=stress`) to prove the same pipeline
-holds at scale, not just on three hand-picked fixtures — then runs the same
-ranking regression gate CI checks on every PR (indexed lexical + persisted
-graph-expansion arms, scored against the corpus's own relevance judgments)
-and prints the measured recall/MRR/nDCG, not an asserted one — then calls
-the actual MCP tool surface (`search_enterprise`, `get_evidence`,
-`list_containers`, `get_freshness`) through `callTool`, the same choke point
-`node dist/cli.js serve` exposes over stdio to Amp/Copilot/Claude Code, so
-what the demo prints is what a real MCP client gets back, including the
-audited query log and the "forbidden looks identical to nonexistent"
-property. Only the Confluence/Jira/Git *source data* is stubbed or synthetic
-— no live connector has landed yet. `src/demo/run.ts` is meant to be
-extended rather than rewritten — each fixture block gets swapped for real
-connector/MCP output as
-that lands, and CI runs the demo on every push/PR so it can't silently rot.
-Runs on any machine with Node 22+; no proxy, no network, no corp credentials
-required.
+Each source URL is optional and independently probed — set only the ones you
+have. `pnpm doctor` also reports `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`/
+`NODE_EXTRA_CA_CERTS` and whether `onnxruntime-node`'s native binary was
+pulled in by mistake (it shouldn't be — this repo only uses the WASM
+backend). Paste the full output back, not a summary — a `–` (skip) is a fact
+still worth having, not a pass.
 
-CI is enabled — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-Every push to `main` and every PR runs `pnpm check` plus the demo smoke test.
+```bash
+pnpm demo            # ~300 objects through the full pipeline, ~5s, zero setup
+pnpm demo:stress     # ~5,000 objects, ~25s
+node dist/cli.js serve   # MCP tool surface over stdio — point Amp/Copilot/Claude Code at this
+```
+
+`pnpm demo` needs nothing from the section above — it runs entirely on
+embedded PGlite with stub connectors and a generated corpus, so it works
+identically on a laptop and on a locked-down corp machine. `pnpm doctor` is
+what tells us whether the *real* sources are reachable from where you are.
+
+---
+
+## What's built
+
+Storage (embedded PGlite or hosted Postgres via `DATABASE_URL`), scope
+registry, scoped stub ingestion for Confluence/Jira/Bitbucket, structural
+chunking with chunk-level ACL overlays, offline WASM embeddings (vendored
+MiniLM model, no network call), atomic index-generation publication,
+ID-diff reconciliation, principal mapping with deny-wins fail-closed
+authorization, durable fenced jobs with retry/DLQ and scheduling, indexed
+lexical + persisted graph-expansion retrieval arms, a measured ranking
+regression gate wired into CI, and an MCP tool surface (`search_enterprise`,
+`get_evidence`, `list_containers`, `get_freshness`) served over stdio with
+query auditing. All of it CI-gated on every push and PR — see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+What isn't built: real Confluence/Jira/Bitbucket connectors (stubs stand in
+today), a durable audit table (the `AuditSink` interface has only an
+in-memory implementation), and a semantic/vector retrieval arm (embeddings
+are computed and stored but nothing queries them yet — deliberately
+deferred until the corpus can measure prose relevance, not just link-walking
+and identifier matching).
 
 ---
 
 ## Read this first
 
-The single most expensive mistake available here is building the wrong thing
-competently. Three framing decisions do more to determine success than every
-implementation detail combined:
+Three framing decisions do more to determine success here than any
+implementation detail:
 
-1. **The MCP tools you already have are not the ingestion path.** They are the
-   *escalation* path. Live tools answer "what is true right now"; the index
-   answers "where is the thing, and what did it say". Feeding bulk ingestion
-   through question-shaped MCP tools will be slow, rate-limited and lossy.
-   → [ADR-0008](docs/adr/0008-mcp-tools-are-escalation-not-ingestion.md)
+1. **The MCP tools you already have are not the ingestion path.** They are
+   the *escalation* path — live tools answer "what is true right now"; the
+   index answers "where is the thing, and what did it say". Feeding bulk
+   ingestion through question-shaped MCP tools is slow, rate-limited, and
+   lossy. → [ADR-0008](docs/adr/0008-mcp-tools-are-escalation-not-ingestion.md)
 
 2. **Whose identity the index belongs to decides whether this is a toy or a
-   platform.** Personal-credential ingestion has perfect ACL fidelity and dies
-   at roughly 20 users. A shared index needs mirrored permissions, and mirrored
-   permissions are the thing that leaks. This is the decision to make on day 1,
-   not month 6. → [ADR-0001](docs/adr/0001-shared-index-with-stamped-acls.md)
+   platform.** Personal-credential ingestion has perfect ACL fidelity and
+   dies at roughly 20 users. A shared index needs mirrored permissions, and
+   mirrored permissions are the thing that leaks. → [ADR-0001](docs/adr/0001-shared-index-with-stamped-acls.md)
 
-3. **Search quality you cannot measure is search quality you cannot defend.**
-   Without a labelled query set, every ranking change is a coin flip and every
-   complaint is unfalsifiable. → [Evaluation](docs/09-evaluation.md)
-
-Everything else follows from these.
+3. **Search quality you cannot measure is search quality you cannot
+   defend.** Without a labelled query set, every ranking change is a coin
+   flip. → [Evaluation](docs/09-evaluation.md)
 
 ---
 
@@ -128,10 +114,10 @@ Everything else follows from these.
 | [10 — Operations](docs/10-operations.md) | Metrics that matter, data-trust auditing, runbooks, on-call |
 | [11 — Roadmap](docs/11-roadmap.md) | Five phases with explicit exit gates |
 | [12 — Risk register](docs/12-risk-register.md) | What actually kills this, ranked, with mitigations |
-| [13 — System diagram & tech stack](docs/13-system-diagram-and-tech-stack.md) | The whole system on one page, every component's technology and its fallback, and the two extension seams |
-| [14 — Prior art, gaps & pre-build changes](docs/14-prior-art-gaps-and-pre-build-changes.md) | What Onyx, ManifoldCF, Elastic and Sourcegraph already solved; 13 gaps in this design; what to change and what to cut before writing code |
-| [15 — Open questions & delivery plan](docs/15-open-questions-and-delivery-plan.md) | The revised eight-plane architecture, 26 open questions each with a recommended default, and the task breakdown with sizes, dependencies and the critical path ([`tasks/TASKS.tsv`](tasks/TASKS.tsv)) |
-| [16 — Scoped ingestion & storage profiles](docs/16-scoped-ingestion-and-storage-profiles.md) | Explicit scopes replace whole-instance crawling; embedded and hosted Postgres as one schema. Collapses capacity by ~100× and removes approximate vector search from the build |
+| [13 — System diagram & tech stack](docs/13-system-diagram-and-tech-stack.md) | The whole system on one page, every component's technology and its fallback |
+| [14 — Prior art, gaps & pre-build changes](docs/14-prior-art-gaps-and-pre-build-changes.md) | What Onyx, ManifoldCF, Elastic and Sourcegraph already solved; gaps in this design |
+| [15 — Open questions & delivery plan](docs/15-open-questions-and-delivery-plan.md) | Open questions with recommended defaults, task breakdown ([`tasks/TASKS.tsv`](tasks/TASKS.tsv)) |
+| [16 — Scoped ingestion & storage profiles](docs/16-scoped-ingestion-and-storage-profiles.md) | Explicit scopes replace whole-instance crawling; embedded and hosted Postgres as one schema |
 
 ### Decisions
 | ADR | Decision |
@@ -154,34 +140,10 @@ Everything else follows from these.
 ## Relationship to `eil`
 
 [`ashark-ai-05/eil`](https://github.com/ashark-ai-05/eil) is the working
-prototype and it is considerably better than "a first draft". It already has
-the canonical document model, extension-free vector storage with a calibrated
-IVF funnel, fail-closed ACL predicates composed into every arm, temporal
-validity, a fenced job queue, and a data-trust audit. Several of its decisions
-are load-bearing here and are adopted rather than revisited.
-
-What this design changes is **the things that only break at organisational
-scale**, where a laptop-shaped answer stops being the right answer:
-
-| Area | `eil` today | Here | Why |
-|---|---|---|---|
-| Index identity | Per-user, personal credentials | Shared, service-account ingest, mirrored ACLs | O(users × corpus) does not scale past a team |
-| ACL expression | `acl_groups jsonb`, allow-only | Principal graph, ALLOW/DENY ACEs, deny-wins | Confluence restrictions and Jira issue security are subtractive; allow-only cannot express them |
-| Change detection | `sha256(body)` | `content_hash` + `meta_hash` | A page move changes inherited restrictions and no body bytes |
-| Group membership | Stamped at ingest | Resolved at query time from the directory | Membership churns hourly; page restrictions churn monthly. Different problems, different SLAs |
-| ANN + ACL | ACL predicate around the vector scan | Container-set pre-filter, then scan | Post-filtering an ANN result destroys recall; pre-filtering an unpartitioned index destroys the index |
-| Jira chunking | Prose chunker | Thread-aware (description / per-comment / synthesized state) | An issue is a conversation, not a page |
-| Logs | `fetch_logs` indexed read path | Not indexed; definitions and runbooks indexed, lines fetched live | Log volume dwarfs the rest of the corpus and is stale on arrival |
-
-Nothing in `eil` is deleted by this design. The migration is additive and is
-sequenced in [the roadmap](docs/11-roadmap.md).
-
----
-
-## Status
-
-Design under review. Nothing here has been implemented, benchmarked in this
-environment, or approved by a security review. Numbers marked **(measured)**
-come from the `eil` repository's own calibration notes; numbers marked
-**(estimated)** are arithmetic from stated assumptions and should be re-measured
-before anyone commits to them.
+personal-scale prototype this design builds on; several of its decisions
+(extension-free vector storage, fail-closed ACL predicates, temporal
+validity) are adopted rather than revisited. What changed here is what only
+breaks at organizational scale — shared-index identity instead of
+per-user credentials, a subtractive ALLOW/DENY ACL model instead of
+allow-only, and query-time group resolution instead of stamping membership
+at ingest. Nothing in `eil` is deleted by this design.
