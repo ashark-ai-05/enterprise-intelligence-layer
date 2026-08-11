@@ -20,6 +20,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: node dist/demo/run.js
+        # Smoke-tests the self-contained demo on every push/PR — as new
+        # capability lands and swaps out a fixture in src/demo/run.ts, CI
+        # catches breakage immediately instead of the demo silently rotting.
       # The embedded (PGlite) profile is exercised by the test suite above.
       # The hosted-Postgres profile gets its own job here once a real
       # instance is available in CI — shipping it untested would be worse
