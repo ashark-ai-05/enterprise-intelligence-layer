@@ -107,12 +107,16 @@ export async function mapPrincipal(
     if (!identityId) throw new Error("identity upsert returned no row");
     await tx.query(
       `INSERT INTO principal_mappings (
-        tenant_id, authorization_domain, source_identifier, enterprise_identity_id, status
-      ) VALUES ($1, $2, $3, $4, 'mapped')
-      ON CONFLICT (tenant_id, authorization_domain, source_identifier) DO UPDATE SET
-        enterprise_identity_id = EXCLUDED.enterprise_identity_id,
-        status = 'mapped', updated_at = now()`,
+        tenant_id, authorization_domain, source_identifier, enterprise_identity_id
+      ) VALUES ($1, $2, $3, $4)
+      ON CONFLICT (tenant_id, authorization_domain, source_identifier, enterprise_identity_id)
+      DO UPDATE SET updated_at = now()`,
       [tenantId, principal.domain, principal.principalId, identityId],
+    );
+    await tx.query(
+      `DELETE FROM unmapped_principals
+       WHERE tenant_id = $1 AND authorization_domain = $2 AND source_identifier = $3`,
+      [tenantId, principal.domain, principal.principalId],
     );
   });
 }
@@ -122,14 +126,21 @@ export async function markPrincipalUnmapped(
   tenantId: string,
   principal: PrincipalRef,
 ): Promise<void> {
-  await db.query(
-    `INSERT INTO principal_mappings (
-      tenant_id, authorization_domain, source_identifier, enterprise_identity_id, status
-    ) VALUES ($1, $2, $3, NULL, 'unmapped')
-    ON CONFLICT (tenant_id, authorization_domain, source_identifier) DO UPDATE SET
-      enterprise_identity_id = NULL, status = 'unmapped', updated_at = now()`,
-    [tenantId, principal.domain, principal.principalId],
-  );
+  await withTransaction(db, async (tx) => {
+    await tx.query(
+      `DELETE FROM principal_mappings
+       WHERE tenant_id = $1 AND authorization_domain = $2 AND source_identifier = $3`,
+      [tenantId, principal.domain, principal.principalId],
+    );
+    await tx.query(
+      `INSERT INTO unmapped_principals (
+        tenant_id, authorization_domain, source_identifier
+      ) VALUES ($1, $2, $3)
+      ON CONFLICT (tenant_id, authorization_domain, source_identifier)
+      DO UPDATE SET updated_at = now()`,
+      [tenantId, principal.domain, principal.principalId],
+    );
+  });
 }
 
 export async function resolveViewerPrincipals(
@@ -141,7 +152,7 @@ export async function resolveViewerPrincipals(
     `SELECT pm.authorization_domain AS domain, pm.source_identifier AS principal_id
      FROM principal_mappings pm
      JOIN enterprise_identities ei ON ei.id = pm.enterprise_identity_id
-     WHERE pm.tenant_id = $1 AND ei.tenant_id = $1 AND ei.subject = $2 AND pm.status = 'mapped'
+     WHERE pm.tenant_id = $1 AND ei.tenant_id = $1 AND ei.subject = $2
      ORDER BY pm.authorization_domain, pm.source_identifier`,
     [tenantId, subject],
   );

@@ -127,8 +127,20 @@ describe("identity and ACL plane", () => {
       await listAuthorizedChunksForSubject(db, "acme", "oidc:alice"),
     ).toHaveLength(1);
 
+    await mapPrincipal(db, "acme", "oidc:carol", engineering);
+    expect(await resolveViewerPrincipals(db, "acme", "oidc:alice")).toEqual([
+      engineering,
+    ]);
+    expect(await resolveViewerPrincipals(db, "acme", "oidc:carol")).toEqual([
+      engineering,
+    ]);
+    expect(
+      await listAuthorizedChunksForSubject(db, "acme", "oidc:carol"),
+    ).toHaveLength(1);
+
     await markPrincipalUnmapped(db, "acme", engineering);
     expect(await resolveViewerPrincipals(db, "acme", "oidc:alice")).toEqual([]);
+    expect(await resolveViewerPrincipals(db, "acme", "oidc:carol")).toEqual([]);
     expect(
       await listAuthorizedChunksForSubject(db, "acme", "oidc:alice"),
     ).toEqual([]);
