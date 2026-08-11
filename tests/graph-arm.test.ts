@@ -236,3 +236,77 @@ describe("graph expansion against the evaluation corpus", () => {
     expect(after.mrr).toBeGreaterThanOrEqual(before.mrr - 0.02);
   }, 600_000);
 });
+
+describe("ordering independence", () => {
+  // The arm's output position *is* its rank, and RRF consumes rank. So if
+  // ordering leaked from the LinkSource, swapping stores would silently change
+  // ranking — which is exactly what happened: an in-memory source interleaving
+  // each seed's neighbours scored recall@10 0.983, and a database source
+  // ordering by id scored 0.700 over the identical set of edges.
+  const links: Link[] = [
+    { from: "PAY-1", to: "zzz-code.ts", type: "implemented-by" },
+    { from: "PAY-1", to: "AAA-page", type: "documents" },
+  ];
+
+  /** Returns the same edges, sorted by target id — the shape a database gives. */
+  class SortedLinkSource extends InMemoryLinkSource {
+    override async neighbours(ids: readonly string[]) {
+      return (await super.neighbours(ids)).sort((a, b) =>
+        a.to < b.to ? -1 : a.to > b.to ? 1 : 0,
+      );
+    }
+  }
+
+  const corpus: CorpusDocument[] = [
+    {
+      id: "PAY-1",
+      source: "jira",
+      container: "PAY",
+      title: "Payment retry incident",
+      body: "payment retries failing",
+      url: "u",
+      syncedAt: null,
+    },
+  ];
+  const viewer: Viewer = {
+    principal: "p",
+    principals: ["p"],
+    containers: ["PAY"],
+  };
+
+  /** Echoes the ids it was asked for, preserving the arm's chosen order. */
+  const echo: HitResolver = {
+    async resolve(ids) {
+      return ids.map((id) => ({
+        id,
+        source: "x",
+        container: "PAY",
+        title: id,
+        url: `u/${id}`,
+      }));
+    },
+  };
+
+  it("orders neighbours by seed rank, not by how the store sorted rows", async () => {
+    const insertion = new GraphExpansionArm(
+      new StrictLexicalArm(corpus),
+      new InMemoryLinkSource(links),
+      echo,
+    );
+    const sorted = new GraphExpansionArm(
+      new StrictLexicalArm(corpus),
+      new SortedLinkSource(links),
+      echo,
+    );
+
+    const fromInsertion = (
+      await insertion.search({ text: "payment retries" }, viewer)
+    ).map((h) => h.id);
+    const fromSorted = (
+      await sorted.search({ text: "payment retries" }, viewer)
+    ).map((h) => h.id);
+
+    expect(new Set(fromSorted)).toEqual(new Set(fromInsertion));
+    expect(fromSorted).toEqual(fromInsertion);
+  });
+});

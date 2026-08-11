@@ -7,13 +7,9 @@
  * predicate stays in one SQL path — container, resource and chunk ACEs, plus
  * publication, all still apply.
  *
- * **Known cost:** `listAuthorizedChunks` has no id filter, so this reads the
- * viewer's authorized chunks for the requested containers and narrows in
- * process. That is bounded by what the viewer can see, not by the corpus, and
- * it is the same shape of limitation the indexed arm had before the lexical
- * seam landed. The fix is symmetrical: an optional `sourceObjectIds` filter on
- * the canonical read would push this into SQL. Documented rather than worked
- * around with a second ACL predicate.
+ * The canonical read now takes a `sourceObjectIds` filter, so narrowing happens
+ * in the same SQL statement as publication and deny-wins enforcement rather
+ * than in process. No second ACL predicate exists anywhere.
  */
 
 import { listAuthorizedChunks } from "../security/acl.js";
