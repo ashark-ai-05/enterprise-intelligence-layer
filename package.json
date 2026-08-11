@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "doctor": "pnpm build && node dist/cli.js doctor",
     "demo": "pnpm build && node dist/demo/run.js",
-    "demo:stress": "pnpm build && EIL_DEMO_CORPUS=stress node dist/demo/run.js"
+    "demo:stress": "pnpm build && EIL_DEMO_CORPUS=stress node dist/demo/run.js",
+    "probe": "node scripts/probe.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
