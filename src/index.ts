@@ -36,3 +36,5 @@ export * from "./links/extract.js";
 export * from "./links/store.js";
 export * from "./jobs/queue.js";
 export * from "./operator/control.js";
+export * from "./serving/tools.js";
+export * from "./serving/mcp-stdio.js";
