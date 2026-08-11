@@ -19,3 +19,5 @@ export * from "./retrieval/stub-arms.js";
 export * from "./federated/arm.js";
 export * from "./eval/metrics.js";
 export * from "./eval/harness.js";
+export * from "./federated/adapters.js";
+export * from "./federated/query-language.js";
