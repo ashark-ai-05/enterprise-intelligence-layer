@@ -42,7 +42,8 @@ assumed by the embedded profile.
 **Try it now:**
 
 ```bash
-pnpm demo
+pnpm demo           # ~300 objects, ~4s total, what CI runs on every push/PR
+pnpm demo:stress    # ~5,000 objects, ~25s, for a heavier local run
 ```
 
 Self-contained — an embedded PGlite database in a throwaway temp directory,
@@ -50,19 +51,25 @@ zero external services, zero credentials, zero admin install. It exercises
 real, merged code end to end: storage, scope registry, the real ingestion
 pipeline (hashing, ACL persistence, checkpointing) via `ingestScope`,
 structural chunking with chunk-level ACL overlays (a restricted Jira comment
-stays restricted independent of its issue), ID-diff reconciliation via
-`reconcileScope` (a source-side deletion detaches and tombstones, chunks
-included), principal mapping and container ACLs via `src/security/acl.ts`
-(mapped vs. unmapped subjects, deny-wins fail-closed authorization, and
-immediate access removal on revocation — demonstrated with five named
-subjects, one of whom loses access mid-run), rank fusion, diversity cap,
-doctor checks. Only the Confluence/Jira
-*source data* is stubbed (`StubConfluenceConnector`/`StubJiraConnector`),
-because no live connector has landed yet. `src/demo/run.ts` is meant to be
-extended rather than rewritten — each fixture block gets swapped for real
-connector/MCP output as that lands, and CI runs the demo on every push/PR so
-it can't silently rot. Runs on any machine with Node 22+; no proxy, no
-network, no corp credentials required.
+stays restricted independent of its issue), offline WASM embeddings via the
+vendored MiniLM model, atomic index-generation publication, ID-diff
+reconciliation via `reconcileScope` (a source-side deletion detaches and
+tombstones, chunks included), principal mapping and container ACLs via
+`src/security/acl.ts` (mapped vs. unmapped subjects, deny-wins fail-closed
+authorization, and immediate access removal on revocation — demonstrated
+with five named subjects, one of whom loses access mid-run), rank fusion,
+diversity cap, doctor checks — then does it all again against
+`src/corpus/synthetic.ts`'s deterministic generated corpus (Confluence pages,
+Jira issues, git repos, cross-source links, relevance judgments, and
+adversarial ACL cases at either a ~300-object `ci` preset or a ~5,000-object
+`stress` preset via `EIL_DEMO_CORPUS=stress`) to prove the same pipeline
+holds at scale, not just on three hand-picked fixtures. Only the
+Confluence/Jira/Git *source data* is stubbed or synthetic — no live connector
+has landed yet. `src/demo/run.ts` is meant to be extended rather than
+rewritten — each fixture block gets swapped for real connector/MCP output as
+that lands, and CI runs the demo on every push/PR so it can't silently rot.
+Runs on any machine with Node 22+; no proxy, no network, no corp credentials
+required.
 
 CI is enabled — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 Every push to `main` and every PR runs `pnpm check` plus the demo smoke test.

@@ -21,8 +21,14 @@ import { join } from "node:path";
 import type { StubEvent } from "../connectors/stubs.js";
 import {
   StubConfluenceConnector,
+  StubGitConnector,
   StubJiraConnector,
 } from "../connectors/stubs.js";
+import {
+  generateSyntheticCorpus,
+  syntheticCorpusCounts,
+  syntheticCorpusPresets,
+} from "../corpus/synthetic.js";
 import { runDoctor } from "../doctor/checks.js";
 import { embedPendingChunks } from "../embeddings/backfill.js";
 import { LocalWasmEmbedder } from "../embeddings/local-wasm.js";
@@ -442,6 +448,181 @@ async function main(): Promise<void> {
     }
 
     section(
+      "Synthetic corpus — proving scale, not just the hand-crafted fixture",
+    );
+    const corpusStress = process.env.EIL_DEMO_CORPUS === "stress";
+    const corpusPreset = corpusStress
+      ? syntheticCorpusPresets.stress
+      : syntheticCorpusPresets.ci;
+    const corpus = generateSyntheticCorpus(corpusPreset);
+    const corpusCounts = syntheticCorpusCounts(corpus);
+    console.log(
+      `preset: ${corpusStress ? "stress" : "ci"} (seed ${corpus.seed}) — set EIL_DEMO_CORPUS=stress for ~5,000 objects instead`,
+    );
+    console.log(
+      `generated: ${corpusCounts.confluenceEvents} confluence, ${corpusCounts.jiraEvents} jira, ${corpusCounts.gitEvents} git change events, ` +
+        `${corpusCounts.links} cross-source links, ${corpusCounts.relevanceJudgments} relevance judgments, ${corpusCounts.aclCases} adversarial ACL cases`,
+    );
+
+    const CORPUS_TENANT = "corpus-demo";
+    const corpusConfluenceScope = await createScope(db, {
+      tenantId: CORPUS_TENANT,
+      source: "confluence",
+      selectorKind: "space",
+      selector: { keys: ["ENG", "SEC"] },
+      refreshMode: "manual",
+      addedBy: "demo",
+    });
+    const corpusJiraScope = await createScope(db, {
+      tenantId: CORPUS_TENANT,
+      source: "jira",
+      selectorKind: "project",
+      selector: { keys: ["PAY"] },
+      refreshMode: "manual",
+      addedBy: "demo",
+    });
+    const repoIds = Array.from(
+      { length: corpusPreset.repositories },
+      (_, index) => `service-${index}`,
+    );
+    const corpusGitScope = await createScope(db, {
+      tenantId: CORPUS_TENANT,
+      source: "git",
+      selectorKind: "repository",
+      selector: { repositories: repoIds, refs: ["main"] },
+      refreshMode: "manual",
+      addedBy: "demo",
+    });
+
+    const corpusIngestStart = Date.now();
+    const corpusConfluenceCounters = await ingestScope(
+      db,
+      CORPUS_TENANT,
+      corpusConfluenceScope.id,
+      new StubConfluenceConnector(corpus.events.confluence),
+    );
+    const corpusJiraCounters = await ingestScope(
+      db,
+      CORPUS_TENANT,
+      corpusJiraScope.id,
+      new StubJiraConnector(corpus.events.jira),
+    );
+    const corpusGitCounters = await ingestScope(
+      db,
+      CORPUS_TENANT,
+      corpusGitScope.id,
+      new StubGitConnector("git", corpus.events.git),
+    );
+    const corpusIngestMs = Date.now() - corpusIngestStart;
+    console.log(
+      `ingested in ${corpusIngestMs}ms — confluence: ${JSON.stringify(corpusConfluenceCounters)}`,
+    );
+    console.log(`jira: ${JSON.stringify(corpusJiraCounters)}`);
+    console.log(`git: ${JSON.stringify(corpusGitCounters)}`);
+
+    const corpusChunkTotal = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM resource_chunks rc
+       JOIN resources r ON r.id = rc.resource_id
+       WHERE r.tenant_id = $1 AND rc.deleted_at IS NULL`,
+      [CORPUS_TENANT],
+    );
+    console.log(
+      `structural chunks stored: ${corpusChunkTotal.rows[0]?.count ?? "0"}`,
+    );
+
+    // Container ACLs come straight from the corpus's own manifest — not
+    // hand-picked, so this exercises whatever the generator actually shipped.
+    const corpusContainerIds = new Map<string, string>();
+    for (const key of Object.keys(corpus.containerAces)) {
+      const [source, sourceContainerId] = key.split(":") as [string, string];
+      corpusContainerIds.set(
+        key,
+        await ensureContainer(
+          db,
+          CORPUS_TENANT,
+          source,
+          sourceContainerId,
+          key,
+        ),
+      );
+    }
+    for (const [key, aces] of Object.entries(corpus.containerAces)) {
+      const containerId = corpusContainerIds.get(key);
+      if (containerId)
+        await replaceContainerAces(db, CORPUS_TENANT, containerId, aces);
+    }
+    const { rows: corpusResourceRows } = await db.query<{
+      id: string;
+      source: string;
+      metadata: Record<string, unknown> | string;
+    }>(
+      "SELECT id, source, metadata FROM resources WHERE tenant_id = $1 AND deleted_at IS NULL",
+      [CORPUS_TENANT],
+    );
+    for (const resource of corpusResourceRows) {
+      const metadata =
+        typeof resource.metadata === "string"
+          ? (JSON.parse(resource.metadata) as Record<string, unknown>)
+          : resource.metadata;
+      const sourceContainerId =
+        resource.source === "confluence"
+          ? (metadata.spaceKey as string | undefined)
+          : resource.source === "jira"
+            ? (metadata.projectKey as string | undefined)
+            : (metadata.repository as string | undefined);
+      const containerId = sourceContainerId
+        ? corpusContainerIds.get(`${resource.source}:${sourceContainerId}`)
+        : undefined;
+      if (containerId)
+        await assignResourceContainer(
+          db,
+          CORPUS_TENANT,
+          resource.id,
+          containerId,
+        );
+    }
+    console.log(
+      `${corpusContainerIds.size} container(s) authorized, ${corpusResourceRows.length} resource(s) assigned`,
+    );
+
+    section("Adversarial ACL case — from the corpus manifest, not hand-picked");
+    const [aclCase] = corpus.aclCases;
+    if (aclCase) {
+      const [allowedDomain, allowedPrincipalId] =
+        aclCase.allowedPrincipal.split(":") as [string, string];
+      const [deniedDomain, deniedPrincipalId] = aclCase.deniedPrincipal.split(
+        ":",
+      ) as [string, string];
+      await mapPrincipal(db, CORPUS_TENANT, "corpus-allowed@example.com", {
+        domain: allowedDomain,
+        principalId: allowedPrincipalId,
+      });
+      await mapPrincipal(db, CORPUS_TENANT, "corpus-denied@example.com", {
+        domain: deniedDomain,
+        principalId: deniedPrincipalId,
+      });
+      const allowedChunks = await listAuthorizedChunksForSubject(
+        db,
+        CORPUS_TENANT,
+        "corpus-allowed@example.com",
+      );
+      const deniedChunks = await listAuthorizedChunksForSubject(
+        db,
+        CORPUS_TENANT,
+        "corpus-denied@example.com",
+      );
+      const sees = (chunks: typeof allowedChunks) =>
+        chunks.some((chunk) => chunk.sourceObjectId === aclCase.sourceObjectId);
+      console.log(
+        `${aclCase.sourceObjectId} (${aclCase.level}-level override): allowedPrincipal sees it = ${sees(allowedChunks)}, deniedPrincipal sees it = ${sees(deniedChunks)}`,
+      );
+      console.log(
+        "(deniedPrincipal otherwise has broad container access — this is a resource/chunk-level override beating that grant, not a missing container ACE)",
+      );
+    }
+
+    section(
       "Doctor — the same environment facts CI and a corp machine both see",
     );
     const report = await runDoctor();
@@ -465,7 +646,10 @@ async function main(): Promise<void> {
       "         offline WASM embeddings, changed-chunk vectors, rank fusion,",
     );
     console.log(
-      "         atomic publication, auditable deletion lifecycle, diversity cap, doctor checks",
+      "         atomic publication, auditable deletion lifecycle, diversity cap, doctor checks,",
+    );
+    console.log(
+      "         a deterministic synthetic corpus proving the same pipeline holds at scale",
     );
     console.log(
       "stub:    Confluence/Jira source data above — no live connector has landed yet",
