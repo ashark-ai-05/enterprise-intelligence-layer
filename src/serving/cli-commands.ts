@@ -22,6 +22,8 @@ import {
   StubJiraConnector,
 } from "../connectors/stubs.js";
 import type { SourceConnector } from "../connectors/types.js";
+import { embedPendingChunks } from "../embeddings/backfill.js";
+import { LocalWasmEmbedder } from "../embeddings/local-wasm.js";
 import {
   type ConnectorRegistry,
   enqueueScopeSync,
@@ -30,9 +32,11 @@ import {
 import { DatabaseLinkSource } from "../links/store.js";
 import { publishCoreGeneration } from "../publication/generations.js";
 import { AuthorizedHitResolver } from "../retrieval/authorized-resolver.js";
+import { FuzzyLexicalArm } from "../retrieval/fuzzy-arm.js";
 import { GraphExpansionArm } from "../retrieval/graph-arm.js";
 import { IndexedLexicalArm } from "../retrieval/indexed-arm.js";
 import { retrieve } from "../retrieval/pipeline.js";
+import { SemanticArm } from "../retrieval/semantic-arm.js";
 import type { RetrievalArm, Viewer } from "../retrieval/types.js";
 import { createScope, listScopes, removeScope } from "../scopes/service.js";
 import type { IngestionScope, Source } from "../scopes/types.js";
@@ -279,11 +283,29 @@ export async function ingestCommand(
   return outcomes;
 }
 
+/**
+ * Embed anything not yet embedded, so semantic search has vectors to search.
+ *
+ * Separate from `ingest` on purpose: embedding is the slow step, and someone
+ * who only wants exact and fuzzy search should not pay for it.
+ */
+export async function embedCommand(
+  db: Database,
+): Promise<{ embedded: number; modelId: string }> {
+  return embedPendingChunks(db, new LocalWasmEmbedder());
+}
+
 /** Every arm available locally: lexical over the index, plus graph expansion. */
 export function localArms(db: Database, tenantId: string): RetrievalArm[] {
   const lexical = new IndexedLexicalArm(db, { tenantId });
   return [
     lexical,
+    // Partial and misspelt words. Weighted below the exact arms: it fills gaps
+    // rather than displacing precise matches.
+    new FuzzyLexicalArm(db, { tenantId }),
+    // Meaning rather than wording. Reports itself unavailable until something
+    // has been embedded, so it costs nothing before the backfill runs.
+    new SemanticArm(db, new LocalWasmEmbedder(), { tenantId }),
     new GraphExpansionArm(
       lexical,
       new DatabaseLinkSource(db, tenantId),

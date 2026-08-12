@@ -18,6 +18,7 @@ import {
   FixtureConnectorRegistry,
   LiveConnectorRegistry,
   addScopeCommand,
+  embedCommand,
   ingestCommand,
   listScopesCommand,
   removeScopeCommand,
@@ -36,6 +37,7 @@ Usage:
   eil scope list
   eil scope remove <id> [--purge]
   eil ingest [--scope <id>] [--fixture]   Sync scopes through the durable queue
+  eil embed                               Embed new chunks for semantic search
   eil search "<query>" [--limit 10]       Search what has been ingested
   eil serve                           Serve the MCP tool surface over stdio
 
@@ -195,6 +197,14 @@ async function runDataCommand(
     return failed > 0 ? 1 : 0;
   }
 
+  if (command === "embed") {
+    const result = await embedCommand(db);
+    process.stdout.write(
+      `Embedded ${result.embedded} chunks with ${result.modelId}\n`,
+    );
+    return 0;
+  }
+
   if (command === "search") {
     const query = rest.find((value) => !value.startsWith("--"));
     if (query === undefined) {
@@ -255,7 +265,12 @@ async function main(argv: readonly string[]): Promise<number> {
     return 0;
   }
 
-  if (command === "scope" || command === "ingest" || command === "search") {
+  if (
+    command === "scope" ||
+    command === "ingest" ||
+    command === "search" ||
+    command === "embed"
+  ) {
     await installGlobalProxy();
     const tenant = resolveTenant();
     const db = await openDatabase({});
