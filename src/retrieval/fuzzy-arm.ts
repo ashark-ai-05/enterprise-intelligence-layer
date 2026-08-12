@@ -20,6 +20,7 @@
 
 import { listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
+import { decorateHits } from "./decorate.js";
 import { toPrincipalRefs } from "./principals.js";
 import { tokenize } from "./stub-arms.js";
 import type {
@@ -244,7 +245,7 @@ export class FuzzyLexicalArm implements RetrievalArm {
       });
     }
 
-    return [...best.values()]
+    const ranked = [...best.values()]
       .sort((a, b) =>
         b.rank !== a.rank
           ? b.rank - a.rank
@@ -256,5 +257,7 @@ export class FuzzyLexicalArm implements RetrievalArm {
       )
       .slice(0, limit)
       .map((entry) => entry.hit);
+
+    return decorateHits(this.db, this.options.tenantId, ranked);
   }
 }

@@ -14,6 +14,7 @@
 
 import { listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
+import { decorateHits } from "./decorate.js";
 import type { HitResolver } from "./graph-arm.js";
 import { toPrincipalRefs } from "./principals.js";
 import type { RetrievalHit, RetrievalQuery, Viewer } from "./types.js";
@@ -70,6 +71,7 @@ export class AuthorizedHitResolver implements HitResolver {
     // order is not a ranking. Ordering by the caller's id list keeps expansion
     // deterministic.
     const order = new Map(sourceObjectIds.map((id, index) => [id, index]));
-    return hits.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    hits.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    return decorateHits(this.db, this.tenantId, hits);
   }
 }
