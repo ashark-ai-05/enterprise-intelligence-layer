@@ -190,6 +190,44 @@ describe("judgment truth is derived independently of the capability it tests", (
     }
   });
 
+  it("navigation truth accounts for every neighbour, not just the ones it names", () => {
+    // Soundness was already guarded: every relevant item is a real neighbour.
+    // This is completeness, which is the half that can fail silently. If a
+    // fixture omitted an edge from *both* relevant and forbidden, the harness
+    // would still report coverage 1.000 — `expected` would simply be smaller.
+    // The spurious count catches an omitted *visible* neighbour, but never an
+    // omitted *protected* one, because the resolver correctly filters it out
+    // before the harness ever sees it.
+    const neighboursOf = new Map<string, Set<string>>();
+    for (const link of seed.corpus.links) {
+      const forward = neighboursOf.get(link.from) ?? new Set<string>();
+      forward.add(link.to);
+      neighboursOf.set(link.from, forward);
+    }
+
+    const navigation = seed.corpus.relevance.filter(
+      (judgment) => judgment.family === "relationship_navigation",
+    );
+    expect(navigation.length).toBeGreaterThan(0);
+
+    for (const judgment of navigation) {
+      expect(judgment.anchor).toBeDefined();
+      const anchor = judgment.anchor as string;
+      const expected = [...(neighboursOf.get(anchor) ?? new Set<string>())].sort();
+      const accounted = [
+        ...judgment.relevantSourceObjectIds,
+        ...(judgment.forbidden ?? []),
+      ].sort();
+
+      // relevant union forbidden == the anchor's complete neighbour set
+      expect(accounted).toEqual(expected);
+      // ...and the two never overlap
+      for (const id of judgment.forbidden ?? []) {
+        expect(judgment.relevantSourceObjectIds).not.toContain(id);
+      }
+    }
+  });
+
   it("no family ever labels a forbidden object relevant", () => {
     // A document the viewer may not see must never be labelled relevant:
     // perfect recall would then be unreachable for a correctly fail-closed
