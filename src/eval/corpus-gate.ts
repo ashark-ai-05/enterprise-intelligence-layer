@@ -18,6 +18,7 @@ import {
   StubJiraConnector,
 } from "../connectors/stubs.js";
 import {
+  type QueryFamily,
   type SyntheticCorpus,
   type SyntheticCorpusOptions,
   generateSyntheticCorpus,
@@ -178,6 +179,17 @@ export interface GateOptions {
   readonly k?: number;
   /** Cap how many judgments are run. The full CI set is 100; a smaller slice keeps iteration fast. */
   readonly limit?: number;
+  /**
+   * Score one query family only.
+   *
+   * Required once the corpus carries families: exact lookup, subject search,
+   * relationship navigation and unanswerable queries measure different
+   * capabilities, and averaging them produces a number that improves when a
+   * scorer gets better at one and worse at another. Defaults to
+   * `subject_search`, which is the closest equivalent to what this gate scored
+   * before the split, so the committed baseline keeps its meaning.
+   */
+  readonly family?: QueryFamily;
 }
 
 /**
@@ -197,10 +209,13 @@ export async function runEvaluationGate(
   const viewer = evalViewer(seed.containerIds);
   const activeArms = arms ?? defaultArms(db);
 
+  // Never pool families. A run that mixes them is not comparable to itself.
+  const family = options.family ?? "subject_search";
+  const inFamily = seed.corpus.relevance.filter(
+    (judgment) => (judgment.family ?? "subject_search") === family,
+  );
   const judgments =
-    options.limit === undefined
-      ? seed.corpus.relevance
-      : seed.corpus.relevance.slice(0, options.limit);
+    options.limit === undefined ? inFamily : inFamily.slice(0, options.limit);
 
   const results = [];
   for (const judgment of judgments) {

@@ -19,9 +19,35 @@ export interface SyntheticLink {
   type: "documents" | "implemented-by" | "tested-by";
 }
 
+/**
+ * Query families, named rather than numbered.
+ *
+ * A single binary relevance list cannot adjudicate three different intents. The
+ * previous judgment asked one query — `"<subject> incident 47"` — to be
+ * simultaneously an exact issue lookup, a subject search, and a graph
+ * traversal, then scored all three against one flat list. A scorer that is
+ * right about one is necessarily wrong about the others, so the aggregate
+ * measured nothing in particular.
+ *
+ * Each family carries truth derived independently of the capability it tests.
+ */
+export type QueryFamily =
+  /** Canonical identifier or quoted phrase. Truth is the exact object. */
+  | "exact_lookup"
+  /** Content subject, no identifiers. Truth is independently assigned subject. */
+  | "subject_search"
+  /** From an anchor, reach its neighbours. Graph truth is legitimate *here*. */
+  | "relationship_navigation"
+  /** No answer exists, or the viewer may not see it. Truth is absence. */
+  | "unanswerable_denied";
+
 export interface SyntheticRelevanceJudgment {
   query: string;
   relevantSourceObjectIds: string[];
+  /** Which capability this query evaluates. Never pool families into one score. */
+  family?: QueryFamily;
+  /** For relationship_navigation: the object the traversal starts from. */
+  anchor?: string;
 }
 
 export interface SyntheticAclCase {
@@ -265,7 +291,7 @@ function page(
     sourceObjectId: pageId,
     sourceVersion: "1",
     canonicalUri: `https://mock.atlassian.test/wiki/spaces/ENG/pages/${index + 1}`,
-    title: `${subject} design ${index + 1}`,
+    title: `${subject} design ${pageId}`,
     body: `Architecture guidance for ${subject}.`,
     metadata: {
       pageId: String(index + 1),
@@ -287,8 +313,8 @@ function page(
           // this runbook covered.
           text:
             referencingIssues.length > 0
-              ? `Runbook ${index + 1}: inspect ${referencingIssues.slice(0, 3).join(", ")} before recovery.`
-              : `Runbook ${index + 1}: no recorded incidents reference this page.`,
+              ? `Runbook ${pageId}: inspect ${referencingIssues.slice(0, 3).join(", ")} before recovery.`
+              : `Runbook ${pageId}: no recorded incidents reference this page.`,
         },
       ],
     },
@@ -320,7 +346,7 @@ function issue(
     sourceObjectId: issueKey,
     sourceVersion: "1",
     canonicalUri: `https://mock.atlassian.test/browse/${issueKey}`,
-    title: `${subject} incident ${index + 1}`,
+    title: `${subject} incident ${issueKey}`,
     body: `Investigate ${subject}; design reference ${pageId}.`,
     metadata: {
       issueKey,
@@ -337,7 +363,7 @@ function issue(
         {
           id: `${issueKey}-restricted`,
           author: "security-analyst",
-          body: `Restricted root cause for ${subject}: credential boundary ${index}.`,
+          body: `Restricted root cause for ${subject}: credential boundary review.`,
           visibility: {
             domain: "jira-role",
             principalId: "service-desk-internal",
@@ -444,10 +470,64 @@ export function generateSyntheticCorpus(
       { from: issueId, to: pageId, type: "documents" },
       { from: issueId, to: codeId, type: "implemented-by" },
     );
+    const subject = topic(options, issueId);
+
+    // exact_lookup — the canonical key, nothing else. Truth is the one object
+    // that key names. This family is expected to *fail* today: classify() does
+    // extract `literal` for an issue key, but nothing consumes it, so there is
+    // no identifier resolution path and the query falls through to token
+    // search. Recording that honestly is the point.
     relevance.push({
-      query: `${topic(options, issueId)} incident ${index + 1}`,
+      family: "exact_lookup",
+      query: issueId,
+      relevantSourceObjectIds: [issueId],
+    });
+
+    // subject_search — content only, no identifier and no ordinal. Truth is the
+    // set of documents independently assigned this subject by seededIndex,
+    // which is computed per object from its own key and never from the links.
+    relevance.push({
+      family: "subject_search",
+      query: subject,
       relevantSourceObjectIds: [issueId, pageId, codeId],
     });
+
+    // relationship_navigation — given the issue, reach its neighbours. Graph
+    // truth is legitimate here precisely because this is the task being
+    // evaluated, rather than being folded into primary retrieval recall.
+    relevance.push({
+      family: "relationship_navigation",
+      query: issueId,
+      anchor: issueId,
+      relevantSourceObjectIds: [pageId, codeId],
+    });
+  }
+
+  // unanswerable_denied — truth is absence, so the subject must appear on *no*
+  // document of any kind. Checking only the issues would have been wrong: pages
+  // and code are assigned subjects independently, so a subject unused by issues
+  // can still be all over Confluence.
+  //
+  // Rather than hunt the vocabulary for leftovers — there are few, because
+  // subjects are sized to be used — these are built one region beyond the
+  // generated vocabulary. Absence then holds by construction rather than by
+  // survey, and it stays true at any corpus size.
+  const vocabulary = new Set(subjectVocabulary(options));
+  const unansweredRegion =
+    Math.ceil(vocabulary.size / (TOPICS.length * SUBSYSTEMS.length)) + 1;
+  let unanswered = 0;
+  for (const subject of TOPICS) {
+    for (const subsystem of SUBSYSTEMS) {
+      if (unanswered >= 20) break;
+      const missing = `${subject} in ${subsystem} region-${unansweredRegion}`;
+      if (vocabulary.has(missing)) continue;
+      relevance.push({
+        family: "unanswerable_denied",
+        query: `${missing} rollback procedure`,
+        relevantSourceObjectIds: [],
+      });
+      unanswered += 1;
+    }
   }
   return {
     seed: options.seed,
