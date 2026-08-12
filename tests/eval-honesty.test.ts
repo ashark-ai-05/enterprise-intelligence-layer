@@ -132,13 +132,55 @@ describe("judgment truth is derived independently of the capability it tests", (
     }
   });
 
-  it("unanswerable truth is absence, and absence is real", () => {
+  it("unanswerable absence is proven against the documents, not just labelled", () => {
+    // Asserting `relevantSourceObjectIds: []` only checks the label agrees with
+    // itself. This checks the corpus: no generated document anywhere carries
+    // the constructed subject, so the empty truth is a fact about the estate
+    // rather than a claim about the fixture.
     const unanswerable = seed.corpus.relevance.filter(
       (judgment) => judgment.family === "unanswerable",
     );
     expect(unanswerable.length).toBeGreaterThan(0);
+
+    const documents = [
+      ...seed.corpus.events.confluence,
+      ...seed.corpus.events.jira,
+      ...seed.corpus.events.git,
+    ].map((event) => JSON.stringify(event.item));
+
     for (const judgment of unanswerable) {
       expect(judgment.relevantSourceObjectIds).toEqual([]);
+      const subject = judgment.query.replace(" rollback procedure", "");
+      expect(documents.some((text) => text.includes(subject))).toBe(false);
+    }
+  });
+
+  it("every (family, query) pair is unique, so no subject is silently overweighted", () => {
+    // subject_search was previously emitted once per Jira issue. Many issues
+    // hash to the same subject, so identical query/truth pairs repeated and
+    // each subject's weight became a property of the hash rather than of
+    // retrieval.
+    const seen = new Set<string>();
+    for (const judgment of seed.corpus.relevance) {
+      const key = `${judgment.family}\u0000${judgment.query}`;
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it("subject truth and forbidden truth are disjoint for the evaluation viewer", () => {
+    // A document the viewer may not see must never be labelled relevant:
+    // perfect recall would then be unreachable for a correctly fail-closed
+    // system, and the benchmark would be rewarding leakage.
+    const forbidden = new Set(
+      seed.corpus.relevance.flatMap((judgment) => judgment.forbidden ?? []),
+    );
+    expect(forbidden.size).toBeGreaterThan(0);
+    for (const judgment of seed.corpus.relevance) {
+      if (judgment.family !== "subject_search") continue;
+      for (const id of judgment.relevantSourceObjectIds) {
+        expect(forbidden.has(id)).toBe(false);
+      }
     }
   });
 });

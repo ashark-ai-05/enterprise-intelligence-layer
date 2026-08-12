@@ -209,8 +209,13 @@ function codeIdAt(options: SyntheticCorpusOptions, index: number): string {
 
 const memberCache = new Map<string, ReadonlyMap<string, string[]>>();
 
+/** Pages restricted to the security group. Mirrors the rule in `page()`. */
+function isRestrictedPage(index: number): boolean {
+  return index % 20 === 0;
+}
+
 /**
- * Every document assigned a given subject.
+ * Every document assigned a given subject *that the evaluation viewer may see*.
  *
  * Deliberately derived only from each object's own identity — the same
  * `seededIndex(seed, key)` the generator uses when building the document — and
@@ -218,6 +223,11 @@ const memberCache = new Map<string, ReadonlyMap<string, string[]>>();
  * truth were selected by the same code that creates the graph edges, scoring
  * graph expansion against it would be circular, which is the defect the family
  * split exists to remove.
+ *
+ * Restricted pages are excluded. Labelling a document the viewer is forbidden
+ * to see as relevant makes perfect recall unreachable for a correctly
+ * fail-closed system, which converts ACL safety into a ranking penalty — the
+ * benchmark would then reward leaking.
  */
 export function subjectMembers(
   options: SyntheticCorpusOptions,
@@ -233,7 +243,10 @@ export function subjectMembers(
       if (bucket === undefined) built.set(key, [id]);
       else bucket.push(id);
     };
-    for (let i = 0; i < options.confluencePages; i += 1) add(pageIdAt(i));
+    for (let i = 0; i < options.confluencePages; i += 1) {
+      if (isRestrictedPage(i)) continue;
+      add(pageIdAt(i));
+    }
     for (let i = 0; i < options.jiraIssues; i += 1) add(`PAY-${i + 1}`);
     for (let i = 0; i < options.repositories * options.filesPerRepository; i += 1)
       add(codeIdAt(options, i));
@@ -527,20 +540,10 @@ export function generateSyntheticCorpus(
       relevantSourceObjectIds: [issueId],
     });
 
-    // subject_search — content only, no identifier and no ordinal.
-    //
-    // Truth is *every* document assigned this subject, computed from each
-    // object's own key via seededIndex. It was previously the trio
-    // [issue, pageFor(issue), codeFor(issue)] — but planLinks() chooses those
-    // two from the same-subject cohort and also creates the graph edges, so the
-    // truth was link-selected after all and measuring graph expansion against
-    // it stayed circular. Subject membership is now independent of planLinks by
-    // construction; `subjectMembers` never consults it.
-    relevance.push({
-      family: "subject_search",
-      query: subject,
-      relevantSourceObjectIds: subjectMembers(options, subject),
-    });
+    // subject_search is emitted once per unique subject after this loop —
+    // many issues hash to the same subject, and emitting per issue duplicated
+    // the identical query/truth pair and weighted subjects by how many issues
+    // happened to land on them.
 
     // relationship_navigation — given the issue, reach its neighbours. Graph
     // truth is legitimate here precisely because this is the task being
@@ -550,6 +553,23 @@ export function generateSyntheticCorpus(
       query: issueId,
       anchor: issueId,
       relevantSourceObjectIds: [pageId, codeId],
+    });
+  }
+
+  // subject_search — one judgment per *unique* subject, in vocabulary order so
+  // the set is deterministic. Emitting one per issue duplicated identical
+  // query/truth pairs and weighted each subject by however many issues happened
+  // to hash onto it, which is a property of the hash rather than of retrieval.
+  //
+  // Truth is every document assigned the subject that the evaluation viewer can
+  // actually see. Restricted pages are excluded by `subjectMembers`.
+  for (const subject of subjectVocabulary(options)) {
+    const members = subjectMembers(options, subject);
+    if (members.length === 0) continue;
+    relevance.push({
+      family: "subject_search",
+      query: subject,
+      relevantSourceObjectIds: members,
     });
   }
 
