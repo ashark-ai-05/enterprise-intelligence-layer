@@ -12,6 +12,7 @@
  * would only discover it when search returned documents that do not exist.
  */
 
+import { confluenceConnectorFromEnv } from "../connectors/confluence.js";
 import { LocalGitConnector } from "../connectors/git-local.js";
 import {
   StubConfluenceConnector,
@@ -139,10 +140,15 @@ export async function removeScopeCommand(
  * of a real space, which is worse than an error because it looks like success.
  */
 export class LiveConnectorRegistry implements ConnectorRegistry {
+  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+
   resolve(scope: IngestionScope): SourceConnector {
     // Git needs no API, credentials or proxy — only a checkout that already
     // exists — so it is live today while the HTTP sources wait on those facts.
     if (scope.source === "git") return new LocalGitConnector();
+    if (scope.source === "confluence") {
+      return confluenceConnectorFromEnv(this.env);
+    }
     throw new Error(
       `No live ${scope.source} connector is implemented yet — this build is fixture-backed.\n  • see the whole pipeline end to end:  pnpm demo\n  • ingest deterministic fixtures:      eil ingest --fixture\nLive connectors are gated on the corporate environment facts from 'node scripts/probe.mjs'.`,
     );

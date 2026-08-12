@@ -5,6 +5,7 @@ import type {
   ValidatedSourceItem,
 } from "../connectors/types.js";
 import {
+  aceSchema,
   connectorCursorSchema,
   sourceItemSchema,
 } from "../connectors/types.js";
@@ -82,6 +83,45 @@ function canonicalAces(aces: AccessControlEntry[]): AccessControlEntry[] {
   );
 }
 
+async function syncContainer(
+  db: Database,
+  tenantId: string,
+  source: Source,
+  item: ValidatedSourceItem,
+): Promise<string | null> {
+  const containerId = item.metadata.containerId;
+  if (typeof containerId !== "string" || !containerId) return null;
+  const name =
+    typeof item.metadata.containerName === "string"
+      ? item.metadata.containerName
+      : containerId;
+  const stored = await db.query<{ id: string }>(
+    `INSERT INTO containers (id, tenant_id, source, source_container_id, name)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (tenant_id, source, source_container_id) DO UPDATE SET
+       name = EXCLUDED.name, updated_at = now()
+     RETURNING id`,
+    [randomUUID(), tenantId, source, containerId, name],
+  );
+  const id = stored.rows[0]?.id;
+  if (!id) throw new Error("container upsert returned no row");
+  if (Array.isArray(item.metadata.containerAcl)) {
+    const aces = item.metadata.containerAcl.flatMap((candidate) => {
+      const parsed = aceSchema.safeParse(candidate);
+      return parsed.success ? [parsed.data] : [];
+    });
+    await db.query("DELETE FROM container_aces WHERE container_id = $1", [id]);
+    for (const ace of canonicalAces(aces)) {
+      await db.query(
+        `INSERT INTO container_aces (container_id, principal_domain, principal_id, effect)
+         VALUES ($1, $2, $3, $4)`,
+        [id, ace.domain, ace.principalId, ace.effect],
+      );
+    }
+  }
+  return id;
+}
+
 async function ingestItem(
   db: Database,
   tenantId: string,
@@ -132,6 +172,9 @@ async function ingestItem(
     );
     const current = existing.rows[0];
     const resourceId = current?.id ?? randomUUID();
+    const containerId = item.deleted
+      ? null
+      : await syncContainer(tx, tenantId, source, item);
 
     if (
       current &&
@@ -182,9 +225,9 @@ async function ingestItem(
         `INSERT INTO resources (
           id, tenant_id, source, source_object_id, canonical_uri, title, source_version,
           body, metadata, raw_hash, content_hash, metadata_hash, acl_hash,
-          source_updated_at, indexed_at
+          source_updated_at, indexed_at, container_id
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, now()
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, now(), $15
         )`,
         [
           resourceId,
@@ -201,6 +244,7 @@ async function ingestItem(
           metadataHash,
           aclHash,
           item.sourceUpdatedAt,
+          containerId,
         ],
       );
       await replaceAces(tx, resourceId, aces);
@@ -226,7 +270,8 @@ async function ingestItem(
           body = CASE WHEN $5 THEN $6 ELSE body END,
           metadata = CASE WHEN $7 THEN $8::jsonb ELSE metadata END,
           raw_hash = $9, content_hash = $10, metadata_hash = $11, acl_hash = $12,
-          source_updated_at = $13, deleted_at = NULL, indexed_at = now(), updated_at = now()
+          source_updated_at = $13, container_id = $14, deleted_at = NULL,
+          indexed_at = now(), updated_at = now()
          WHERE id = $1`,
         [
           resourceId,
@@ -242,6 +287,7 @@ async function ingestItem(
           metadataHash,
           aclHash,
           item.sourceUpdatedAt,
+          containerId,
         ],
       );
       if (aclChanged) await replaceAces(tx, resourceId, aces);
