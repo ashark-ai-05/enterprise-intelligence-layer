@@ -15,13 +15,29 @@
  * tenant while ingestion wrote to the local one. The CLI found documents and the
  * MCP tool found nothing, from one database, for the same query — and the tool
  * is the surface Amp, Copilot and Claude Code actually connect to.
+ *
+ * When `EIL_TELEMETRY_SINK_PATH` is set, every tool call also appends a
+ * metadata-only canonical event (see `../telemetry/canonical-event-sink.ts`)
+ * so this session's activity is observable outside the process. Unset by
+ * default: no behavior change for a user who has not opted in.
  */
 
 import { openDatabase } from "../storage/database.js";
 import { migrate } from "../storage/migrations.js";
+import { CanonicalEventAuditSink } from "../telemetry/canonical-event-sink.js";
 import { localArms, localViewer, resolveTenant } from "./cli-commands.js";
 import { serveStdio } from "./mcp-stdio.js";
-import { InMemoryAuditSink, type ToolContext } from "./tools.js";
+import {
+  type AuditSink,
+  InMemoryAuditSink,
+  type ToolContext,
+} from "./tools.js";
+
+function resolveAuditSink(tenantId: string): AuditSink {
+  const path = process.env.EIL_TELEMETRY_SINK_PATH;
+  if (!path) return new InMemoryAuditSink();
+  return new CanonicalEventAuditSink({ path, tenantId });
+}
 
 export async function serveMcp(): Promise<void> {
   const db = await openDatabase({});
@@ -34,7 +50,7 @@ export async function serveMcp(): Promise<void> {
     tenantId,
     arms: localArms(db, tenantId),
     viewer: await localViewer(db, tenantId),
-    audit: new InMemoryAuditSink(),
+    audit: resolveAuditSink(tenantId),
   };
 
   await serveStdio(context);
