@@ -168,6 +168,28 @@ describe("judgment truth is derived independently of the capability it tests", (
     }
   });
 
+  it("relationship truth excludes protected neighbours, which move to forbidden", () => {
+    // Same defect class as the subject_search leak, in planLinks() rather than
+    // subjectMembers(): the link plan picks pages without an ACL filter, so a
+    // restricted page could be labelled a relevant neighbour. The edge is kept
+    // — real estates link incidents to protected postmortems — but the
+    // protected neighbour is never "relevant", or a fail-closed system could
+    // not score perfectly and the benchmark would reward leaking it.
+    const navigation = seed.corpus.relevance.filter(
+      (judgment) => judgment.family === "relationship_navigation",
+    );
+    const withProtected = navigation.filter(
+      (judgment) => (judgment.forbidden ?? []).length > 0,
+    );
+    expect(withProtected.length).toBeGreaterThan(0);
+
+    for (const judgment of navigation) {
+      for (const id of judgment.forbidden ?? []) {
+        expect(judgment.relevantSourceObjectIds).not.toContain(id);
+      }
+    }
+  });
+
   it("subject truth and forbidden truth are disjoint for the evaluation viewer", () => {
     // A document the viewer may not see must never be labelled relevant:
     // perfect recall would then be unreachable for a correctly fail-closed
@@ -176,8 +198,10 @@ describe("judgment truth is derived independently of the capability it tests", (
       seed.corpus.relevance.flatMap((judgment) => judgment.forbidden ?? []),
     );
     expect(forbidden.size).toBeGreaterThan(0);
+    // Every family, not just subject_search — the same leak appeared twice in
+    // two different functions, so the guard is written once against all of
+    // them rather than per family.
     for (const judgment of seed.corpus.relevance) {
-      if (judgment.family !== "subject_search") continue;
       for (const id of judgment.relevantSourceObjectIds) {
         expect(forbidden.has(id)).toBe(false);
       }

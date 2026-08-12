@@ -214,6 +214,12 @@ function isRestrictedPage(index: number): boolean {
   return index % 20 === 0;
 }
 
+/** The same rule, by id, for callers that hold `CONF-n` rather than an index. */
+function isRestrictedPageId(id: string): boolean {
+  const match = /^CONF-(\d+)$/.exec(id);
+  return match ? isRestrictedPage(Number(match[1]) - 1) : false;
+}
+
 /**
  * Every document assigned a given subject *that the evaluation viewer may see*.
  *
@@ -548,11 +554,24 @@ export function generateSyntheticCorpus(
     // relationship_navigation — given the issue, reach its neighbours. Graph
     // truth is legitimate here precisely because this is the task being
     // evaluated, rather than being folded into primary retrieval recall.
+    //
+    // The edge into a restricted page is deliberately *kept*. Real estates link
+    // incidents to protected postmortems, and a navigation capability that
+    // returns the visible neighbours while refusing the protected one is
+    // exactly the behaviour worth testing. What must not happen is labelling
+    // the protected neighbour "relevant": a fail-closed system could then never
+    // score perfectly, and the benchmark would reward leaking it.
+    const neighbours = [pageId, codeId];
+    const visible = neighbours.filter((id) => !isRestrictedPageId(id));
+    const protectedNeighbours = neighbours.filter(isRestrictedPageId);
     relevance.push({
       family: "relationship_navigation",
       query: issueId,
       anchor: issueId,
-      relevantSourceObjectIds: [pageId, codeId],
+      relevantSourceObjectIds: visible,
+      ...(protectedNeighbours.length > 0
+        ? { forbidden: protectedNeighbours }
+        : {}),
     });
   }
 
