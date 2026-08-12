@@ -36,6 +36,7 @@ import { FuzzyLexicalArm } from "../retrieval/fuzzy-arm.js";
 import { GraphExpansionArm } from "../retrieval/graph-arm.js";
 import { IndexedLexicalArm } from "../retrieval/indexed-arm.js";
 import { retrieve } from "../retrieval/pipeline.js";
+import type { SearchFilters } from "../retrieval/query-filters.js";
 import { SemanticArm } from "../retrieval/semantic-arm.js";
 import type { RetrievalArm, Viewer } from "../retrieval/types.js";
 import { createScope, listScopes, removeScope } from "../scopes/service.js";
@@ -346,9 +347,11 @@ export async function searchCommand(
   tenantId: string,
   query: string,
   limit = 10,
+  filters: SearchFilters = {},
 ): Promise<Awaited<ReturnType<typeof retrieve>>> {
   const viewer = await localViewer(db, tenantId);
   return retrieve(localArms(db, tenantId), { text: query, limit }, viewer, {
     limit,
+    filters,
   });
 }

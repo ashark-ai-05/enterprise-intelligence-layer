@@ -13,6 +13,7 @@ import { type AuthorizedChunk, listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
 import { decorateHits } from "./decorate.js";
 import { toPrincipalRefs } from "./principals.js";
+import { parsePhrase } from "./query-filters.js";
 import { tokenize, tokenizeCode } from "./stub-arms.js";
 import type {
   RetrievalArm,
@@ -87,9 +88,69 @@ export class IndexedLexicalArm implements RetrievalArm {
     return true;
   }
 
+  /** Adjacency-enforcing search for a quoted query. */
+  async #phraseSearch(
+    phrase: string,
+    query: RetrievalQuery,
+    viewer: Viewer,
+  ): Promise<RetrievalHit[]> {
+    const authorized = await listAuthorizedChunks(
+      this.db,
+      this.options.tenantId,
+      toPrincipalRefs(viewer.principals),
+      query.containers === undefined ? [] : [...query.containers],
+    );
+    if (authorized.length === 0) return [];
+
+    const matching = await this.db.query<{ chunk_id: string; rank: number }>(
+      `SELECT id AS chunk_id, ts_rank_cd(search_vector, phraseto_tsquery('simple', $1)) AS rank
+         FROM resource_chunks
+        WHERE deleted_at IS NULL
+          AND id = ANY($2::uuid[])
+          AND search_vector @@ phraseto_tsquery('simple', $1)
+        ORDER BY rank DESC`,
+      [phrase, authorized.map((chunk) => chunk.chunkId)],
+    );
+
+    const byChunk = new Map(authorized.map((chunk) => [chunk.chunkId, chunk]));
+    const best = new Map<string, RetrievalHit>();
+
+    for (const row of matching.rows) {
+      const chunk = byChunk.get(row.chunk_id);
+      if (chunk === undefined || best.has(chunk.resourceId)) continue;
+      if (
+        query.sources !== undefined &&
+        query.sources.length > 0 &&
+        !query.sources.includes(chunk.source)
+      ) {
+        continue;
+      }
+      best.set(chunk.resourceId, {
+        id: chunk.sourceObjectId,
+        source: chunk.source,
+        container: chunk.containerId,
+        title: chunk.stableKey,
+        url: `eil://${chunk.source}/${chunk.sourceObjectId}`,
+        snippet: chunk.text.slice(0, 300),
+        syncedAt: new Date(0).toISOString(),
+      });
+    }
+
+    return decorateHits(this.db, this.options.tenantId, [...best.values()]);
+  }
+
   async search(query: RetrievalQuery, viewer: Viewer): Promise<RetrievalHit[]> {
-    const terms = tokenize(query.text);
-    const codeTerms = tokenizeCode(query.text);
+    const { phrase, text } = parsePhrase(query.text);
+
+    // A quoted query is a request for adjacency, and until now nothing
+    // enforced it: the quotes were stripped by tokenising and the words matched
+    // anywhere, in any order. `phraseto_tsquery` is what actually honours them.
+    if (phrase !== null) {
+      return this.#phraseSearch(phrase, query, viewer);
+    }
+
+    const terms = tokenize(text);
+    const codeTerms = tokenizeCode(text);
     if (terms.length === 0 && codeTerms.length === 0) return [];
 
     const principals = toPrincipalRefs(viewer.principals);

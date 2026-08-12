@@ -22,6 +22,7 @@ import { listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
 import { decorateHits } from "./decorate.js";
 import { toPrincipalRefs } from "./principals.js";
+import { parsePhrase } from "./query-filters.js";
 import { tokenize } from "./stub-arms.js";
 import type {
   RetrievalArm,
@@ -186,6 +187,11 @@ export class FuzzyLexicalArm implements RetrievalArm {
 
   async search(query: RetrievalQuery, viewer: Viewer): Promise<RetrievalHit[]> {
     const limit = query.limit ?? this.options.limit ?? DEFAULTS.limit;
+
+    // Quoting is a request for precision. Correcting or prefix-expanding the
+    // terms of a quoted phrase would silently do the opposite.
+    if (parsePhrase(query.text).phrase !== null) return [];
+
     const { terms } = await this.expand(query.text);
     if (terms.length === 0) return [];
 
