@@ -340,10 +340,15 @@ export interface FamilyReport {
   readonly mrr?: number;
   readonly ndcgAtK?: number;
   /**
-   * Fraction of queries that returned at least one result. For `unanswerable`
-   * the target is 0 — every answer is a false positive.
+   * Fraction of *empty-truth* queries for which retrieval returned at least one
+   * candidate. Target 0.
+   *
+   * Named for what it measures. This is retrieval-level abstention only: it
+   * shows the retriever does not decline, not that an agent went on to assert a
+   * false answer. Answer generation and verification are not evaluated here, so
+   * agent-level abstention belongs in the acceptance harness.
    */
-  readonly answeredRate?: number;
+  readonly retrievalAnsweredRate?: number;
   /** Queries where a forbidden object was returned. Must be 0. */
   readonly leakedQueries?: number;
   /** Distinct forbidden objects returned across the family. Must be 0. */
@@ -375,7 +380,6 @@ export async function runFamilyEvaluation(
     options.limit === undefined ? inFamily : inFamily.slice(0, options.limit);
 
   const results = [];
-  let answered = 0;
   let leakedQueries = 0;
   const leakedObjects = new Set<string>();
 
@@ -387,7 +391,6 @@ export async function runFamilyEvaluation(
       { limit: k, maxPerSource: k, maxPerContainer: k },
     );
     const retrieved = result.hits.map((hit) => hit.id);
-    if (retrieved.length > 0) answered += 1;
 
     const leaked = (judgment.forbidden ?? []).filter((id) =>
       retrieved.includes(id),
@@ -404,25 +407,36 @@ export async function runFamilyEvaluation(
     });
   }
 
-  const hasTruth = results.some((row) => row.relevant.length > 0);
-  const report = score(results, k);
+  // Partition per row, not per family. A family-level `.some()` would score
+  // empty-truth rows through recallAt/ndcgAt -- which return 1 for empty truth
+  // -- and silently inject a perfect score into a mixed family's aggregate.
+  // Every family is uniform today; this is what stops that being load-bearing.
+  const withTruth = results.filter((row) => row.relevant.length > 0);
+  const withoutTruth = results.filter((row) => row.relevant.length === 0);
+  const answeredWithoutTruth = withoutTruth.filter(
+    (row) => row.retrieved.length > 0,
+  ).length;
   const namesForbidden = judgments.some(
     (judgment) => (judgment.forbidden ?? []).length > 0,
   );
 
+  const ranked = withTruth.length > 0 ? score(withTruth, k) : undefined;
+
   return {
     family,
     queries: results.length,
-    ...(hasTruth
+    ...(ranked
       ? {
-          recallAtK: report.recallAtK,
-          mrr: report.mrr,
-          ndcgAtK: report.ndcgAtK,
+          recallAtK: ranked.recallAtK,
+          mrr: ranked.mrr,
+          ndcgAtK: ranked.ndcgAtK,
         }
       : {}),
-    ...(hasTruth
-      ? {}
-      : { answeredRate: results.length === 0 ? 0 : answered / results.length }),
+    ...(withoutTruth.length > 0
+      ? {
+          retrievalAnsweredRate: answeredWithoutTruth / withoutTruth.length,
+        }
+      : {}),
     ...(namesForbidden ? { leakedQueries, leakedObjects: leakedObjects.size } : {}),
   };
 }
