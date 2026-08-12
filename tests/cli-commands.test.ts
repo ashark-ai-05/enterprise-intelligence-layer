@@ -104,9 +104,9 @@ describe("scope commands", () => {
 
   it("lists and removes scopes", async () => {
     const scope = await addScopeCommand(db, TENANT, {
-      source: "confluence",
-      kind: "space",
-      values: ["ARCH"],
+      source: "bitbucket",
+      kind: "repositories",
+      values: ["payments-api"],
       addedBy: "test",
     });
     expect(await listScopesCommand(db, TENANT)).toHaveLength(1);
@@ -126,9 +126,9 @@ describe("ingest refuses rather than substitutes", () => {
     // success and only surface when search returned documents that do not
     // exist. An error is the kinder failure.
     const scope = await addScopeCommand(db, TENANT, {
-      source: "confluence",
-      kind: "space",
-      values: ["ARCH"],
+      source: "bitbucket",
+      kind: "repositories",
+      values: ["payments-api"],
       addedBy: "test",
     });
 
@@ -140,7 +140,7 @@ describe("ingest refuses rather than substitutes", () => {
     );
     expect(outcomes[0]?.status).not.toBe("completed");
     expect(outcomes[0]?.error).toMatch(
-      /No live confluence connector is implemented yet/,
+      /No live bitbucket connector is implemented yet/,
     );
   }, 120_000);
 

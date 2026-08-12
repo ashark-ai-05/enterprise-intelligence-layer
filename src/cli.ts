@@ -41,6 +41,9 @@ Usage:
 
 Environment:
   EIL_CONFLUENCE_URL      probed for reachability
+  EIL_CONFLUENCE_TOKEN    API token (Bearer, or Basic with EIL_CONFLUENCE_EMAIL)
+  EIL_CONFLUENCE_EMAIL    Cloud account email for Basic authentication
+  EIL_CONFLUENCE_PRINCIPAL current source account id/email for personal ACLs
   EIL_JIRA_URL            probed for reachability
   EIL_BITBUCKET_URL       probed for reachability
   EIL_NPM_REGISTRY        probed for reachability
@@ -250,6 +253,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   if (command === "scope" || command === "ingest" || command === "search") {
+    await installGlobalProxy();
     const tenant = resolveTenant();
     const db = await openDatabase({});
     await migrate(db);
