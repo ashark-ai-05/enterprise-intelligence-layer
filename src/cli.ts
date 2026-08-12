@@ -40,11 +40,14 @@ Usage:
   eil serve                           Serve the MCP tool surface over stdio
 
 Environment:
-  EIL_CONFLUENCE_URL      probed for reachability
+  EIL_CONFLUENCE_URL      probed for reachability, and live connector base URL
   EIL_CONFLUENCE_TOKEN    API token (Bearer, or Basic with EIL_CONFLUENCE_EMAIL)
   EIL_CONFLUENCE_EMAIL    Cloud account email for Basic authentication
   EIL_CONFLUENCE_PRINCIPAL current source account id/email for personal ACLs
-  EIL_JIRA_URL            probed for reachability
+  EIL_JIRA_URL            probed for reachability, and live connector base URL
+  EIL_JIRA_TOKEN          API token (Bearer, or Basic with EIL_JIRA_EMAIL)
+  EIL_JIRA_EMAIL          Cloud account email for Basic authentication
+  EIL_JIRA_PRINCIPAL      current source account id/email for personal ACLs
   EIL_BITBUCKET_URL       probed for reachability
   EIL_NPM_REGISTRY        probed for reachability
   EIL_MAAS_URL            probed, including whether it serves embeddings

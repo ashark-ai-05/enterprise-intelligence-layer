@@ -14,6 +14,7 @@
 
 import { confluenceConnectorFromEnv } from "../connectors/confluence.js";
 import { LocalGitConnector } from "../connectors/git-local.js";
+import { jiraConnectorFromEnv } from "../connectors/jira.js";
 import {
   StubConfluenceConnector,
   StubFilesConnector,
@@ -148,6 +149,9 @@ export class LiveConnectorRegistry implements ConnectorRegistry {
     if (scope.source === "git") return new LocalGitConnector();
     if (scope.source === "confluence") {
       return confluenceConnectorFromEnv(this.env);
+    }
+    if (scope.source === "jira") {
+      return jiraConnectorFromEnv(this.env);
     }
     throw new Error(
       `No live ${scope.source} connector is implemented yet — this build is fixture-backed.\n  • see the whole pipeline end to end:  pnpm demo\n  • ingest deterministic fixtures:      eil ingest --fixture\nLive connectors are gated on the corporate environment facts from 'node scripts/probe.mjs'.`,

@@ -5,8 +5,9 @@ Jira, Git/Bitbucket, and file content. It provides scope-driven incremental
 ingestion, fail-closed ACL enforcement, lexical and graph retrieval, offline
 embeddings, and an MCP interface.
 
-The repository currently runs end to end on deterministic source fixtures.
-Live ingestion connectors are the next integration step.
+The repository runs end to end on deterministic source fixtures, and live
+ingestion is implemented for Git, Confluence, and Jira. Bitbucket and file
+connectors are still fixture-backed.
 
 ## Requirements
 
@@ -98,19 +99,20 @@ args:    /absolute/path/to/enterprise-intelligence-layer/dist/cli.js serve
 
 ### Live enterprise ingestion status
 
-There is not yet a supported CLI command that ingests live Confluence, Jira,
-or Bitbucket data. The source URL variables used by `pnpm doctor` only test
-connectivity; they do not ingest content. Do not treat commands such as
-`eil ingest confluence` as available—they have not been implemented.
+Git, Confluence, and Jira have live connectors; Bitbucket and files are still
+fixture-backed. The source URL variables used by `pnpm doctor` only test
+connectivity, not ingestion — the credentials the connectors themselves need
+are documented in [Choose what to index, index it, search it](#choose-what-to-index-index-it-search-it)
+below.
 
-Live commands will be documented here only after the connector can fetch
-authoritative content and ACLs and has passed delta, deletion, permission-change,
-proxy, rate-limit, and replay acceptance tests. The intended scope shapes are:
+Live commands are documented only after a connector can fetch authoritative
+content and ACLs and has passed delta, deletion, permission-change, proxy,
+rate-limit, and replay acceptance tests. The supported scope shapes today:
 
 ```text
-Confluence: exact page URL/ID, page subtree, or selected space
-Jira:       exact issue key, saved filter, or selected project
-Code:       selected repository, refs, include paths, and exclude paths
+Confluence: exact page ID, or selected space (CQL delta)
+Jira:       exact issue key, or selected project (JQL delta)
+Git:        selected repository, tracked at the default ref
 ```
 
 ## Corporate-machine checks
@@ -268,13 +270,43 @@ after a commit  {"discovered":2,"contentUpdated":1, ...} # only what changed
 `node_modules`, `vendor`, `dist`, minified bundles, lockfiles and binaries are
 excluded by policy, not by remembering to.
 
-### Confluence and Jira refuse rather than pretend
+### Confluence and Jira work live
 
-No live HTTP connector is implemented yet, so against a real Confluence space
-`ingest` fails with:
+Both need an API token and a personal principal — the account whose read
+access the connector fetches under. Only that principal (plus any source-native
+restrictions the API returns) is granted locally: this is single-user personal
+mode, not shared-identity/group resolution.
+
+```bash
+export EIL_CONFLUENCE_URL="https://confluence.example.corp"
+export EIL_CONFLUENCE_TOKEN="<api-token>"
+export EIL_CONFLUENCE_PRINCIPAL="you@example.corp"
+node dist/cli.js scope add confluence space PAY
+node dist/cli.js ingest
+
+export EIL_JIRA_URL="https://jira.example.corp"
+export EIL_JIRA_TOKEN="<api-token>"
+export EIL_JIRA_PRINCIPAL="you@example.corp"
+node dist/cli.js scope add jira project PAY --schedule 1h
+node dist/cli.js ingest
+```
+
+`ingest` needs the same credentials as `scope add` — a prefixed `VAR=value cmd`
+only applies to that one command, so unexported variables would silently drop
+before `ingest` runs and `LiveConnectorRegistry` would refuse for a missing
+token rather than a bad one.
+
+Cloud instances that use Basic auth also need an email — set
+`EIL_CONFLUENCE_EMAIL` / `EIL_JIRA_EMAIL` alongside the token, and the
+connector switches from a Bearer header to Basic automatically. Delta sync
+uses CQL `lastmodified >=` (Confluence) and JQL `updated >=` (Jira) against the
+scope's last-seen cursor.
+
+Bitbucket and file scopes still refuse rather than pretend — no live connector
+exists for them yet, so `ingest` fails with:
 
 ```
-No live confluence connector is implemented yet — this build is fixture-backed.
+No live bitbucket connector is implemented yet — this build is fixture-backed.
   • see the whole pipeline end to end:  pnpm demo
   • ingest deterministic fixtures:      eil ingest --fixture
 ```
