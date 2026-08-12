@@ -60,6 +60,8 @@ describe("tool surface", () => {
     const names = TOOLS.map((tool) => tool.name);
     expect(names).toEqual([
       "search_enterprise",
+      "lookup_object",
+      "related_evidence",
       "get_evidence",
       "list_containers",
       "get_freshness",
@@ -90,6 +92,101 @@ describe("tool surface", () => {
     await expect(
       callTool("drop_everything", {}, context),
     ).rejects.toBeInstanceOf(ToolError);
+  });
+});
+
+describe("exact lookup and related evidence", () => {
+  it("resolves an exact id without text ranking", async () => {
+    const payload = parse(
+      (await callTool("lookup_object", { id: "PAY-1" }, context)).content,
+    ) as unknown as { found: boolean; hit: { id: string } };
+    expect(payload.found).toBe(true);
+    expect(payload.hit.id).toBe("PAY-1");
+  });
+
+  it("does not distinguish a forbidden anchor from a missing one", async () => {
+    const blind: ToolContext = {
+      ...context,
+      viewer: {
+        principal: "nobody",
+        principals: [],
+        containers: seed.containerIds,
+      },
+    };
+    const denied = parse(
+      (await callTool("lookup_object", { id: "PAY-1" }, blind)).content,
+    );
+    const missing = parse(
+      (await callTool("lookup_object", { id: "PAY-1-missing" }, context))
+        .content,
+    );
+    expect(denied.found).toBe(false);
+    expect(missing.found).toBe(false);
+    expect(Object.keys(denied)).toEqual(Object.keys(missing));
+  });
+
+  it("returns direct related evidence with provenance", async () => {
+    const payload = parse(
+      (await callTool("related_evidence", { id: "PAY-1" }, context)).content,
+    ) as unknown as {
+      found: boolean;
+      evidence: { anchorId: string; relation: string }[];
+    };
+    expect(payload.found).toBe(true);
+    expect(payload.evidence.length).toBeGreaterThan(0);
+    expect(
+      payload.evidence.every(
+        (item) => item.anchorId === "PAY-1" && item.relation.length > 0,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not traverse from a forbidden anchor", async () => {
+    const blind: ToolContext = {
+      ...context,
+      viewer: {
+        principal: "nobody",
+        principals: [],
+        containers: seed.containerIds,
+      },
+    };
+    const payload = parse(
+      (await callTool("related_evidence", { id: "PAY-1" }, blind)).content,
+    );
+    expect(payload).toEqual({
+      anchorId: "PAY-1",
+      found: false,
+      evidence: [],
+    });
+  });
+
+  it("filters a protected neighbour while preserving visible siblings", async () => {
+    const judgment = seed.corpus.relevance.find(
+      (item) =>
+        item.family === "relationship_navigation" &&
+        (item.forbidden?.length ?? 0) > 0,
+    );
+    expect(judgment).toBeDefined();
+    const payload = parse(
+      (
+        await callTool(
+          "related_evidence",
+          { id: judgment?.query ?? "" },
+          context,
+        )
+      ).content,
+    ) as unknown as { evidence: { id: string }[] };
+    const ids = payload.evidence.map((item) => item.id);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids.some((id) => judgment?.forbidden?.includes(id))).toBe(false);
+    expect(audit.entries.at(-1)?.aclRejected).toBeUndefined();
+    expect("filteredCount" in payload).toBe(false);
+  });
+
+  it("rejects fractional limits outside JSON Schema validation", async () => {
+    await expect(
+      callTool("related_evidence", { id: "PAY-1", limit: 1.5 }, context),
+    ).rejects.toThrow(/limit must be an integer/);
   });
 });
 

@@ -75,7 +75,9 @@ export class CanonicalEventAuditSink implements AuditSink {
       tool: entry.tool,
       result_count: entry.resultCount,
       arms_skipped: entry.armsSkipped.length,
-      acl_rejected: entry.aclRejected,
+      ...(entry.aclRejected === undefined
+        ? {}
+        : { acl_rejected: entry.aclRejected }),
       acl_drift: entry.aclDrift,
     };
     if (entry.query !== undefined) {

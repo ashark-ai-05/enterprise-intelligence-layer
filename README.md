@@ -328,9 +328,23 @@ node dist/cli.js serve
 Available read-only tools:
 
 - `search_enterprise`
+- `lookup_object` — exact, ACL-filtered resolution of a canonical source ID or Jira key
+- `related_evidence` — direct-anchor navigation with relation provenance and independent ACL checks
 - `get_evidence`
 - `list_containers`
 - `get_freshness`
+
+The exact-ID and navigation paths are also available from the CLI after
+ingestion:
+
+```bash
+eil lookup PAY-47 --source jira --json
+eil related PAY-47 --source jira --limit 20 --json
+```
+
+`lookup` does not depend on the text index containing the identifier.
+`related` starts from that exact object and independently re-checks every
+neighbour's permissions; a link is never treated as authorization.
 
 The current stdio identity model is for personal/local use. Do not expose it as
 a shared service; shared deployment requires caller-derived enterprise identity

@@ -18,6 +18,10 @@
  * → docs/08-serving-and-front-doors.md
  */
 
+import {
+  relatedEvidence,
+  resolveExactObject,
+} from "../retrieval/object-surfaces.js";
 import { retrieve } from "../retrieval/pipeline.js";
 import { toPrincipalRefs } from "../retrieval/principals.js";
 import type {
@@ -56,7 +60,7 @@ export interface AuditEntry {
   readonly resultCount: number;
   readonly armsSkipped: readonly string[];
   /** Non-zero means an arm returned something the viewer could not see. Alarm on it. */
-  readonly aclRejected: number;
+  readonly aclRejected?: number;
   /** Non-zero means mirrored permissions and a source disagree. Alarm on it. */
   readonly aclDrift: number;
 }
@@ -123,6 +127,45 @@ export const TOOLS: readonly ToolDefinition[] = [
     },
   },
   {
+    name: "lookup_object",
+    description:
+      "Resolve an exact canonical source object id or Jira key without full-text ranking. Permissions are checked before metadata is returned.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Canonical source object id" },
+        source: {
+          type: "string",
+          enum: ["confluence", "jira", "git", "bitbucket", "files"],
+          description: "Required when the id exists in more than one source",
+        },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "related_evidence",
+    description:
+      "Return ACL-filtered documents directly related to a known source object id, with relation provenance.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "Canonical anchor source object id",
+        },
+        source: {
+          type: "string",
+          enum: ["confluence", "jira", "git", "bitbucket", "files"],
+          description:
+            "Required when the anchor id exists in more than one source",
+        },
+        limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+      },
+      required: ["id"],
+    },
+  },
+  {
     name: "get_evidence",
     description:
       "Fetch the indexed content of one document by its source object id. Permissions are " +
@@ -182,6 +225,16 @@ function optionalNumber(
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new ToolError(`${name} must be a number`);
+  }
+  return value;
+}
+
+function optionalSource(args: Record<string, unknown>): string | undefined {
+  const value = args.source;
+  if (value === undefined) return undefined;
+  const allowed = ["confluence", "jira", "git", "bitbucket", "files"];
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new ToolError("source is invalid");
   }
   return value;
 }
@@ -304,6 +357,75 @@ async function getEvidence(
   };
 }
 
+async function lookupObject(
+  context: ToolContext,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const id = requireString(args, "id");
+  const source = optionalSource(args);
+  const result = await resolveExactObject(
+    context.db,
+    context.tenantId,
+    context.viewer,
+    id,
+    source,
+  );
+  await context.audit.record({
+    principal: context.viewer.principal,
+    tool: "lookup_object",
+    query: id,
+    resultCount: result.found ? 1 : 0,
+    armsSkipped: [],
+    aclRejected: 0,
+    aclDrift: 0,
+  });
+  return {
+    content: JSON.stringify(
+      result.found
+        ? { notice: PROVENANCE_NOTICE, ...result }
+        : { id, found: false },
+      null,
+      2,
+    ),
+  };
+}
+
+async function getRelatedEvidence(
+  context: ToolContext,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const id = requireString(args, "id");
+  const requestedLimit = optionalNumber(args, "limit", 20);
+  if (!Number.isInteger(requestedLimit)) {
+    throw new ToolError("limit must be an integer");
+  }
+  const limit = Math.min(Math.max(requestedLimit, 1), 50);
+  const source = optionalSource(args);
+  const result = await relatedEvidence(
+    context.db,
+    context.tenantId,
+    context.viewer,
+    id,
+    limit,
+    source,
+  );
+  await context.audit.record({
+    principal: context.viewer.principal,
+    tool: "related_evidence",
+    query: id,
+    resultCount: result.evidence.length,
+    armsSkipped: [],
+    aclDrift: 0,
+  });
+  return {
+    content: JSON.stringify(
+      result.found ? { notice: PROVENANCE_NOTICE, ...result } : result,
+      null,
+      2,
+    ),
+  };
+}
+
 async function listContainers(context: ToolContext): Promise<ToolResult> {
   const result = await context.db.query<{
     id: string;
@@ -373,6 +495,10 @@ export async function callTool(
   switch (name) {
     case "search_enterprise":
       return searchEnterprise(context, args);
+    case "lookup_object":
+      return lookupObject(context, args);
+    case "related_evidence":
+      return getRelatedEvidence(context, args);
     case "get_evidence":
       return getEvidence(context, args);
     case "list_containers":
