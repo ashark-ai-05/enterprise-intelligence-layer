@@ -238,6 +238,91 @@ export async function runEvaluationGate(
   return score(results, k);
 }
 
+export interface NavigationReport {
+  readonly anchors: number;
+  /** Mean fraction of an anchor's visible neighbours that were returned. */
+  readonly coverage: number;
+  /** Anchors where every visible neighbour was returned. */
+  readonly complete: number;
+  /** Returned objects that are not neighbours of the anchor. */
+  readonly spurious: number;
+  /** Protected neighbours returned. Must be 0. */
+  readonly leaked: number;
+}
+
+/**
+ * Evaluate relationship navigation as navigation.
+ *
+ * Scoring this family through ordinary search measured something else
+ * entirely: the query was the anchor id, exact lookup does not exist, so the
+ * anchor was never retrieved and graph expansion started from unrelated seeds.
+ * Graph-on and graph-off were consequently identical, which said nothing about
+ * whether the system can navigate.
+ *
+ * This supplies the known anchor directly to the link source and resolves the
+ * result through the ACL resolver — the composition `GraphExpansionArm` uses
+ * internally, minus the search step it cannot rely on. Note what that implies:
+ * **no product surface exposes anchor-based navigation.** There is no MCP tool
+ * and no CLI verb for "given this issue, show its related evidence". This
+ * harness reaches past the product to measure a capability the product does not
+ * currently offer, and that gap is the finding, not the coverage number.
+ */
+export async function runNavigationEvaluation(
+  db: Database,
+  seed: SeedResult,
+  options: { limit?: number } = {},
+): Promise<NavigationReport> {
+  const viewer = evalViewer(seed.containerIds);
+  const links = new DatabaseLinkSource(db, EVAL_TENANT);
+  const resolver = new AuthorizedHitResolver(db, EVAL_TENANT);
+
+  const judgments = seed.corpus.relevance
+    .filter((judgment) => judgment.family === "relationship_navigation")
+    .slice(0, options.limit ?? 20);
+
+  let coverageTotal = 0;
+  let complete = 0;
+  let spurious = 0;
+  let leaked = 0;
+
+  for (const judgment of judgments) {
+    const anchor = judgment.anchor;
+    if (anchor === undefined) continue;
+
+    const neighbours = await links.neighbours([anchor]);
+    const reached = neighbours.map((link) =>
+      link.from === anchor ? link.to : link.from,
+    );
+    // The resolver takes the query only to honour its container scope; the
+    // anchor is supplied directly, so there is no text to search with.
+    const visible = await resolver.resolve(reached, viewer, {
+      text: "",
+      containers: seed.containerIds,
+    });
+    const returned = new Set(visible.map((hit) => hit.id));
+
+    const expected = judgment.relevantSourceObjectIds;
+    const found = expected.filter((id) => returned.has(id));
+    coverageTotal += expected.length === 0 ? 1 : found.length / expected.length;
+    if (found.length === expected.length) complete += 1;
+
+    for (const id of returned) {
+      if (!expected.includes(id)) spurious += 1;
+    }
+    for (const id of judgment.forbidden ?? []) {
+      if (returned.has(id)) leaked += 1;
+    }
+  }
+
+  return {
+    anchors: judgments.length,
+    coverage: judgments.length === 0 ? 0 : coverageTotal / judgments.length,
+    complete,
+    spurious,
+    leaked,
+  };
+}
+
 /**
  * What a family's numbers actually mean.
  *
