@@ -190,7 +190,7 @@ describe("judgment truth is derived independently of the capability it tests", (
     }
   });
 
-  it("subject truth and forbidden truth are disjoint for the evaluation viewer", () => {
+  it("no family ever labels a forbidden object relevant", () => {
     // A document the viewer may not see must never be labelled relevant:
     // perfect recall would then be unreachable for a correctly fail-closed
     // system, and the benchmark would be rewarding leakage.

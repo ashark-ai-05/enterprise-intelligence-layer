@@ -238,6 +238,110 @@ export async function runEvaluationGate(
   return score(results, k);
 }
 
+/**
+ * What a family's numbers actually mean.
+ *
+ * Ranking metrics are omitted where truth is empty rather than reported as
+ * perfect. `recallAt` and `ndcgAt` both return 1 for an empty relevant set —
+ * mathematically conventional, operationally a hardcoded pass. Measured on the
+ * unanswerable family that produced "recall 1.000, nDCG 1.000" while the
+ * system answered every single query it should have refused.
+ */
+export interface FamilyReport {
+  readonly family: QueryFamily;
+  readonly queries: number;
+  /** Omitted when the family's truth is empty; meaningless there. */
+  readonly recallAtK?: number;
+  readonly mrr?: number;
+  readonly ndcgAtK?: number;
+  /**
+   * Fraction of queries that returned at least one result. For `unanswerable`
+   * the target is 0 — every answer is a false positive.
+   */
+  readonly answeredRate?: number;
+  /** Queries where a forbidden object was returned. Must be 0. */
+  readonly leakedQueries?: number;
+  /** Distinct forbidden objects returned across the family. Must be 0. */
+  readonly leakedObjects?: number;
+}
+
+/**
+ * Score one family with metrics appropriate to what it measures.
+ *
+ * Never pools families and never reports a ranking metric a family cannot
+ * support. Leakage is checked for every family that names forbidden objects,
+ * not only `denied` — relationship navigation carries protected neighbours too.
+ */
+export async function runFamilyEvaluation(
+  db: Database,
+  seed: SeedResult,
+  arms?: readonly RetrievalArm[],
+  options: GateOptions = {},
+): Promise<FamilyReport> {
+  const k = options.k ?? 10;
+  const viewer = evalViewer(seed.containerIds);
+  const activeArms = arms ?? defaultArms(db);
+  const family = options.family ?? "subject_search";
+
+  const inFamily = seed.corpus.relevance.filter(
+    (judgment) => (judgment.family ?? "subject_search") === family,
+  );
+  const judgments =
+    options.limit === undefined ? inFamily : inFamily.slice(0, options.limit);
+
+  const results = [];
+  let answered = 0;
+  let leakedQueries = 0;
+  const leakedObjects = new Set<string>();
+
+  for (const judgment of judgments) {
+    const result = await retrieve(
+      activeArms,
+      { text: judgment.query, limit: k },
+      viewer,
+      { limit: k, maxPerSource: k, maxPerContainer: k },
+    );
+    const retrieved = result.hits.map((hit) => hit.id);
+    if (retrieved.length > 0) answered += 1;
+
+    const leaked = (judgment.forbidden ?? []).filter((id) =>
+      retrieved.includes(id),
+    );
+    if (leaked.length > 0) {
+      leakedQueries += 1;
+      for (const id of leaked) leakedObjects.add(id);
+    }
+
+    results.push({
+      query: judgment.query,
+      retrieved,
+      relevant: judgment.relevantSourceObjectIds,
+    });
+  }
+
+  const hasTruth = results.some((row) => row.relevant.length > 0);
+  const report = score(results, k);
+  const namesForbidden = judgments.some(
+    (judgment) => (judgment.forbidden ?? []).length > 0,
+  );
+
+  return {
+    family,
+    queries: results.length,
+    ...(hasTruth
+      ? {
+          recallAtK: report.recallAtK,
+          mrr: report.mrr,
+          ndcgAtK: report.ndcgAtK,
+        }
+      : {}),
+    ...(hasTruth
+      ? {}
+      : { answeredRate: results.length === 0 ? 0 : answered / results.length }),
+    ...(namesForbidden ? { leakedQueries, leakedObjects: leakedObjects.size } : {}),
+  };
+}
+
 export interface Baseline {
   readonly recallAtK: number;
   readonly mrr: number;
