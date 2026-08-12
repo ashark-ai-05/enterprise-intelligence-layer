@@ -38,6 +38,81 @@ Run the full acceptance suite:
 pnpm check
 ```
 
+## Ingest and retrieve data
+
+### Runnable now: generated Confluence, Jira, and code
+
+The current ingestion connectors are deterministic fixtures. This command
+generates and ingests all three source types, publishes their indexes, then
+runs cross-source search and evidence retrieval through the real MCP tool
+implementation:
+
+```bash
+pnpm demo
+```
+
+Use the larger generated corpus when testing throughput and reconciliation:
+
+```bash
+pnpm demo:stress
+```
+
+Look for these sections in the output:
+
+```text
+Synthetic corpus        Confluence + Jira + Git ingestion counters
+Evaluation              retrieval measurements
+MCP tool surface        search_enterprise + get_evidence results
+```
+
+### Query a populated local database over MCP
+
+Build the project, then send newline-delimited JSON-RPC messages to the stdio
+server. The server uses `EIL_DATA_DIR` (default `.eil/data`) or `DATABASE_URL`.
+
+```bash
+pnpm build
+
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_enterprise","arguments":{"query":"payment retry policy"}}}' \
+  | node dist/cli.js serve
+```
+
+Fetch the full authorized evidence for an ID returned by search:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_evidence","arguments":{"id":"PAY-1","maxBytes":8000}}}' \
+  | node dist/cli.js serve
+```
+
+For normal use, configure the stdio command in an MCP-capable client instead
+of typing JSON-RPC manually:
+
+```text
+command: node
+args:    /absolute/path/to/enterprise-intelligence-layer/dist/cli.js serve
+```
+
+### Live enterprise ingestion status
+
+There is not yet a supported CLI command that ingests live Confluence, Jira,
+or Bitbucket data. The source URL variables used by `pnpm doctor` only test
+connectivity; they do not ingest content. Do not treat commands such as
+`eil ingest confluence` as available—they have not been implemented.
+
+Live commands will be documented here only after the connector can fetch
+authoritative content and ACLs and has passed delta, deletion, permission-change,
+proxy, rate-limit, and replay acceptance tests. The intended scope shapes are:
+
+```text
+Confluence: exact page URL/ID, page subtree, or selected space
+Jira:       exact issue key, saved filter, or selected project
+Code:       selected repository, refs, include paths, and exclude paths
+```
+
 ## Corporate-machine checks
 
 ### Fastest path: no install required
