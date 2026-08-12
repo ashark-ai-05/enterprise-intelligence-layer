@@ -34,33 +34,81 @@ interface ScoredResource {
 }
 
 /**
- * Score a chunk against the query terms.
- *
- * Term coverage with a small bonus for repeated matches. This is deliberately
- * *not* BM25: Postgres `ts_rank` is not BM25 either (no IDF, no length
- * normalisation), and implementing real BM25 is gated on the evaluation harness
- * so the change can be measured rather than guessed at. → docs/06 "The BM25 gap"
+ * BM25 constants. The values from the original literature, recorded here
+ * *before* any evaluation run and deliberately not tuned against it — a
+ * constant fitted to the eval set is a fixture-tuned constant, which is the
+ * failure this whole line of work exists to avoid.
  */
-function scoreChunk(
-  chunk: AuthorizedChunk,
-  terms: readonly string[],
-  codeTerms: readonly string[],
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+
+interface CorpusStatistics {
+  /** Number of scored chunks in the authorized candidate set. */
+  readonly n: number;
+  /** Chunks containing each term, within that set. */
+  readonly documentFrequency: ReadonlyMap<string, number>;
+  /** Mean chunk length in tokens. */
+  readonly averageLength: number;
+}
+
+/**
+ * Score a chunk with BM25 over statistics from the authorized candidate set.
+ *
+ * Replaces `coverage * 100 + min(frequency, 10)`, which had no notion of term
+ * rarity or document length and therefore tied constantly: measured on the
+ * corrected corpus, 28 of 30 stress queries had their top two results on
+ * *identical* scores, leaving the order to an alphabetical id tie-break. Every
+ * downstream ranking policy was then deciding ties the scorer never resolved.
+ *
+ * Two deliberate deviations from textbook BM25, both consequences of where the
+ * statistics come from:
+ *
+ * 1. **Statistics are local to the authorized candidate set**, not the corpus.
+ *    That is required, not merely convenient: computing them over all documents
+ *    would make a viewer's ranking depend on documents they cannot see, which
+ *    leaks corpus facts across an ACL boundary.
+ * 2. **The candidate set is already term-filtered.** `listAuthorizedChunks`
+ *    pre-filters with an OR `to_tsquery`, so every candidate contains at least
+ *    one query term and no candidate has df 0. IDF here therefore measures
+ *    rarity *among documents that matched*, which is the discrimination we
+ *    actually want, but it is not corpus IDF and must not be described as such.
+ */
+function bm25Score(
+  tokens: readonly string[],
+  wanted: readonly string[],
+  stats: CorpusStatistics,
 ): number {
-  const haystack =
-    chunk.source === "git" ? tokenizeCode(chunk.text) : tokenize(chunk.text);
-  const present = new Set(haystack);
-  const wanted = chunk.source === "git" ? codeTerms : terms;
-  if (wanted.length === 0) return 0;
+  if (wanted.length === 0 || tokens.length === 0) return 0;
 
-  let matched = 0;
-  for (const term of wanted) if (present.has(term)) matched += 1;
-  if (matched === 0) return 0;
+  const frequency = new Map<string, number>();
+  for (const token of tokens)
+    frequency.set(token, (frequency.get(token) ?? 0) + 1);
 
-  // Coverage dominates; frequency breaks ties without letting a long chunk win
-  // on repetition alone.
-  const coverage = matched / wanted.length;
-  const frequency = haystack.filter((token) => wanted.includes(token)).length;
-  return coverage * 100 + Math.min(frequency, 10);
+  const length = tokens.length;
+  const normalisation =
+    stats.averageLength === 0 ? 1 : length / stats.averageLength;
+
+  let score = 0;
+  // Unique terms: a query repeating a word must not be paid for it twice.
+  for (const term of new Set(wanted)) {
+    const termFrequency = frequency.get(term);
+    if (termFrequency === undefined) continue;
+
+    const df = stats.documentFrequency.get(term) ?? 0;
+    const idf = Math.log(
+      1 + (stats.n - df + 0.5) / (df + 0.5),
+    );
+    const saturation =
+      termFrequency +
+      BM25_K1 * (1 - BM25_B + BM25_B * normalisation);
+    score += idf * ((termFrequency * (BM25_K1 + 1)) / saturation);
+  }
+  return score;
+}
+
+/** Tokenise as the arm scores: code tokens for git, prose tokens otherwise. */
+function tokensFor(chunk: AuthorizedChunk): string[] {
+  return chunk.source === "git" ? tokenizeCode(chunk.text) : tokenize(chunk.text);
 }
 
 /**
@@ -163,12 +211,11 @@ export class IndexedLexicalArm implements RetrievalArm {
       query.text,
     );
 
-    // Best chunk per resource. A page with five matching sections is one result,
-    // not five — the alternative buries every other document under one verbose
-    // page, which is the same failure the source-diversity cap prevents across
-    // sources.
-    const best = new Map<string, ScoredResource>();
-
+    // Tokenise once. BM25 needs document frequency and average length across the
+    // candidate set, so the set has to be walked before anything can be scored —
+    // and re-tokenising per chunk in both passes would double the cost of the
+    // most expensive step.
+    const scorable: { chunk: AuthorizedChunk; tokens: string[] }[] = [];
     for (const chunk of chunks) {
       if (
         query.sources !== undefined &&
@@ -177,8 +224,37 @@ export class IndexedLexicalArm implements RetrievalArm {
       ) {
         continue;
       }
+      scorable.push({ chunk, tokens: tokensFor(chunk) });
+    }
 
-      const score = scoreChunk(chunk, terms, codeTerms);
+    const documentFrequency = new Map<string, number>();
+    let totalLength = 0;
+    for (const { tokens } of scorable) {
+      totalLength += tokens.length;
+      // Presence, not count: document frequency counts documents, not mentions.
+      for (const token of new Set(tokens)) {
+        documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
+      }
+    }
+    const stats: CorpusStatistics = {
+      n: scorable.length,
+      documentFrequency,
+      averageLength:
+        scorable.length === 0 ? 0 : totalLength / scorable.length,
+    };
+
+    // Best chunk per resource. A page with five matching sections is one result,
+    // not five — the alternative buries every other document under one verbose
+    // page, which is the same failure the source-diversity cap prevents across
+    // sources.
+    const best = new Map<string, ScoredResource>();
+
+    for (const { chunk, tokens } of scorable) {
+      const score = bm25Score(
+        tokens,
+        chunk.source === "git" ? codeTerms : terms,
+        stats,
+      );
       if (score === 0) continue;
 
       const existing = best.get(chunk.resourceId);
