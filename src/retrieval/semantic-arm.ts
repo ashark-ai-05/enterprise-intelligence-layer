@@ -19,6 +19,7 @@
 import type { Embedder } from "../embeddings/types.js";
 import { listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
+import { decorateHits } from "./decorate.js";
 import { toPrincipalRefs } from "./principals.js";
 import type {
   RetrievalArm,
@@ -156,7 +157,7 @@ export class SemanticArm implements RetrievalArm {
       });
     }
 
-    return [...best.values()]
+    const ranked = [...best.values()]
       .sort((a, b) =>
         b.score !== a.score
           ? b.score - a.score
@@ -168,6 +169,8 @@ export class SemanticArm implements RetrievalArm {
       )
       .slice(0, limit)
       .map((entry) => entry.hit);
+
+    return decorateHits(this.db, this.options.tenantId, ranked);
   }
 }
 

@@ -11,6 +11,7 @@
 
 import { type AuthorizedChunk, listAuthorizedChunks } from "../security/acl.js";
 import type { Database } from "../storage/database.js";
+import { decorateHits } from "./decorate.js";
 import { toPrincipalRefs } from "./principals.js";
 import { tokenize, tokenizeCode } from "./stub-arms.js";
 import type {
@@ -138,7 +139,7 @@ export class IndexedLexicalArm implements RetrievalArm {
       });
     }
 
-    return [...best.values()]
+    const ranked = [...best.values()]
       .sort((a, b) =>
         b.score !== a.score
           ? b.score - a.score
@@ -149,5 +150,7 @@ export class IndexedLexicalArm implements RetrievalArm {
               : 0,
       )
       .map((scored) => scored.hit);
+
+    return decorateHits(this.db, this.options.tenantId, ranked);
   }
 }
