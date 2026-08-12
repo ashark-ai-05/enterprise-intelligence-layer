@@ -278,18 +278,23 @@ restrictions the API returns) is granted locally: this is single-user personal
 mode, not shared-identity/group resolution.
 
 ```bash
-EIL_CONFLUENCE_URL="https://confluence.example.corp" \
-EIL_CONFLUENCE_TOKEN="<api-token>" \
-EIL_CONFLUENCE_PRINCIPAL="you@example.corp" \
-  node dist/cli.js scope add confluence space PAY
-  node dist/cli.js ingest
+export EIL_CONFLUENCE_URL="https://confluence.example.corp"
+export EIL_CONFLUENCE_TOKEN="<api-token>"
+export EIL_CONFLUENCE_PRINCIPAL="you@example.corp"
+node dist/cli.js scope add confluence space PAY
+node dist/cli.js ingest
 
-EIL_JIRA_URL="https://jira.example.corp" \
-EIL_JIRA_TOKEN="<api-token>" \
-EIL_JIRA_PRINCIPAL="you@example.corp" \
-  node dist/cli.js scope add jira project PAY --schedule 1h
-  node dist/cli.js ingest
+export EIL_JIRA_URL="https://jira.example.corp"
+export EIL_JIRA_TOKEN="<api-token>"
+export EIL_JIRA_PRINCIPAL="you@example.corp"
+node dist/cli.js scope add jira project PAY --schedule 1h
+node dist/cli.js ingest
 ```
+
+`ingest` needs the same credentials as `scope add` — a prefixed `VAR=value cmd`
+only applies to that one command, so unexported variables would silently drop
+before `ingest` runs and `LiveConnectorRegistry` would refuse for a missing
+token rather than a bad one.
 
 Cloud instances that use Basic auth also need an email — set
 `EIL_CONFLUENCE_EMAIL` / `EIL_JIRA_EMAIL` alongside the token, and the

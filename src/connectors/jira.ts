@@ -21,7 +21,8 @@ export interface JiraConnectorOptions {
 interface Comment extends Record<string, unknown> {
   id?: string;
   author?: { displayName?: string; accountId?: string; name?: string };
-  body?: string;
+  // Typed unknown, not string: see textField() below.
+  body?: unknown;
   created?: string;
   visibility?: { type?: string; value?: string };
 }
@@ -31,7 +32,8 @@ interface Issue extends Record<string, unknown> {
   key: string;
   fields?: {
     summary?: string;
-    description?: string;
+    // Typed unknown, not string: see textField() below.
+    description?: unknown;
     updated?: string;
     created?: string;
     project?: { key?: string; name?: string };
@@ -62,6 +64,37 @@ function jqlString(value: string): string {
 /** JQL date comparisons want "yyyy-MM-dd HH:mm", not ISO 8601. */
 function jqlDate(value: Date): string {
   return value.toISOString().slice(0, 16).replace("T", " ");
+}
+
+/**
+ * Depth-first leaf text of an Atlassian Document Format node, block nodes
+ * newline-separated and inline nodes space-separated.
+ *
+ * This connector deliberately calls REST API v2, not v3: v2 returns
+ * `description`/comment `body` as plain wiki-markup strings on every Jira
+ * edition. v3 is the one that returns ADF (a JSON document tree) instead,
+ * which this connector does not otherwise speak. The walk below is a
+ * defense, not the primary path — it exists so a v3-shaped payload
+ * degrades to readable text instead of the literal string
+ * `"[object Object]"` reaching the index.
+ */
+function adfText(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const record = node as Record<string, unknown>;
+  if (typeof record.text === "string") return record.text;
+  const content = Array.isArray(record.content) ? record.content : [];
+  const parts = content.map((child) => adfText(child)).filter(Boolean);
+  const block =
+    record.type === "paragraph" ||
+    record.type === "heading" ||
+    record.type === "listItem" ||
+    record.type === "codeBlock";
+  return parts.join(block ? "\n" : " ");
+}
+
+function textField(value: unknown): string {
+  if (typeof value === "string") return value;
+  return adfText(value).trim();
 }
 
 /**
@@ -205,7 +238,7 @@ export class JiraConnector implements SourceConnector {
       const visibility = commentVisibility(comment);
       return {
         id: comment.id ?? "",
-        body: comment.body ?? "",
+        body: textField(comment.body),
         ...(comment.author?.displayName
           ? { author: comment.author.displayName }
           : {}),
@@ -213,6 +246,7 @@ export class JiraConnector implements SourceConnector {
         ...(visibility ? { visibility } : {}),
       };
     });
+    const description = textField(fields.description);
     return {
       sourceObjectId: issue.key,
       sourceVersion: updated,
@@ -221,7 +255,7 @@ export class JiraConnector implements SourceConnector {
         `${this.baseUrl}/`,
       ).toString(),
       title: fields.summary ?? issue.key,
-      body: fields.description ?? "",
+      body: description,
       metadata: {
         issueKey: issue.key,
         projectKey,
@@ -234,7 +268,7 @@ export class JiraConnector implements SourceConnector {
             effect: "allow",
           },
         ],
-        description: fields.description ?? "",
+        description,
         comments,
       },
       acl: issueAcl(issue, this.options.principal),

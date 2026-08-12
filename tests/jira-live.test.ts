@@ -162,4 +162,50 @@ describe("live Jira connector", () => {
       }),
     ).toThrow("EIL_JIRA_TOKEN");
   });
+
+  it("degrades an Atlassian Document Format description to text instead of [object Object]", async () => {
+    // This connector calls REST API v2, which returns plain strings on every
+    // Jira edition — this exercises the defensive fallback for a v3-shaped
+    // (ADF) payload, not the primary path.
+    const adfIssue = {
+      ...issue(),
+      fields: {
+        ...issue().fields,
+        description: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Retry payment calls" }],
+            },
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "three times and alert." }],
+            },
+          ],
+        },
+      },
+    };
+    const connector = new JiraConnector({
+      baseUrl: "https://issues.example.test",
+      token: "token",
+      principal: "account-1",
+      fetch: vi.fn(async () => response(adfIssue)) as typeof fetch,
+    });
+    const scope = await createScope(db, {
+      tenantId: "local",
+      source: "jira",
+      selectorKind: "issues",
+      selector: { ids: ["PAY-4471"] },
+      refreshMode: "manual",
+      addedBy: "test",
+    });
+    await ingestScope(db, "local", scope.id, connector);
+    const stored = await db.query<{ body: string }>(
+      "SELECT body FROM resources",
+    );
+    expect(stored.rows[0]?.body).not.toContain("[object Object]");
+    expect(stored.rows[0]?.body).toContain("Retry payment calls");
+    expect(stored.rows[0]?.body).toContain("three times and alert.");
+  });
 });
