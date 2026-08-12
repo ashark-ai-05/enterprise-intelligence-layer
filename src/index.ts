@@ -5,6 +5,7 @@ export * from "./scopes/types.js";
 export * from "./connectors/types.js";
 export * from "./connectors/stubs.js";
 export * from "./connectors/confluence.js";
+export * from "./connectors/jira.js";
 export * from "./ingestion/pipeline.js";
 export * from "./ingestion/reconcile.js";
 export * from "./normalization/types.js";

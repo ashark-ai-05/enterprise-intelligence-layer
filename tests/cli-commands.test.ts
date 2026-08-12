@@ -146,9 +146,9 @@ describe("ingest refuses rather than substitutes", () => {
 
   it("names the fixture path in the error, so the message is actionable", async () => {
     const scope = await addScopeCommand(db, TENANT, {
-      source: "jira",
-      kind: "project",
-      values: ["PAY"],
+      source: "bitbucket",
+      kind: "repositories",
+      values: ["payments-api"],
       addedBy: "test",
     });
     const outcomes = await ingestCommand(
