@@ -141,6 +141,49 @@ pnpm doctor
 The doctor reports skipped checks as unknown, not passed. Share its output only
 after removing internal hostnames if required by company policy.
 
+## Choose what to index, index it, search it
+
+Scopes are explicit: nothing is ingested that you have not named. Sources accept
+`space`/`page` (Confluence), `project`/`issues` (Jira), `repositories`
+(Git/Bitbucket), `paths` (files).
+
+```bash
+pnpm build
+
+# 1. name what to index
+node dist/cli.js scope add confluence space ARCH ENG
+node dist/cli.js scope add confluence page 81923
+node dist/cli.js scope add jira project PAY --schedule 1h
+node dist/cli.js scope add jira issues PAY-4471 PAY-4472
+node dist/cli.js scope add git repositories payments-api shared-auth
+node dist/cli.js scope list
+
+# 2. index it — runs through the durable queue, with leases and checkpoints
+node dist/cli.js ingest                       # every scope
+node dist/cli.js ingest --scope <scope-id>    # one scope
+
+# 3. search what was indexed
+node dist/cli.js search "payment retry policy"
+node dist/cli.js search "handleRetry" --limit 20
+
+# stop indexing a scope; --purge also deletes documents no other scope claims
+node dist/cli.js scope remove <scope-id> [--purge]
+```
+
+**`ingest` currently refuses rather than pretending.** No live source connector
+is implemented yet, so against a real Confluence space it fails with:
+
+```
+No live confluence connector is implemented yet — this build is fixture-backed.
+  • see the whole pipeline end to end:  pnpm demo
+  • ingest deterministic fixtures:      eil ingest --fixture
+```
+
+That refusal is deliberate. Ingesting synthetic pages under the name of a real
+space would look like success and would only surface later, as search results
+for documents that do not exist. Live connectors are gated on the environment
+facts from `node scripts/probe.mjs`.
+
 ## Run the MCP server
 
 Build, then start MCP over stdio:
