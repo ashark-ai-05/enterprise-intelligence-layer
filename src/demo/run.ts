@@ -634,13 +634,19 @@ async function main(): Promise<void> {
     section(
       "Evaluation — retrieval quality, measured against the corpus's own relevance labels",
     );
-    const evalSeed = await seedEvaluationCorpus(db, syntheticCorpusPresets.ci);
+    // Scored on whichever corpus this run selected. Previously pinned to `ci`,
+    // so a run launched as `demo:stress` reported small-corpus quality under a
+    // large-corpus heading — the one number here nobody could check by eye.
+    const evalSeed = await seedEvaluationCorpus(db, corpusPreset);
     const evalReport = await runEvaluationGate(db, evalSeed, undefined, {
       limit: 20,
     });
+    console.log(
+      `scored on the ${corpusStress ? "stress" : "ci"} corpus (seed ${corpusPreset.seed})`,
+    );
     console.log(formatReport(evalReport));
     console.log(
-      "same arms, same gate CI runs on every PR — this is the number a ranking change has to beat, not a demo-only stat",
+      "same arms and gate CI runs on every PR — but CI always scores the ci corpus, so only a ci-preset run is comparable to the committed baseline",
     );
 
     section("MCP tool surface — the same choke point Amp/Copilot will call");
