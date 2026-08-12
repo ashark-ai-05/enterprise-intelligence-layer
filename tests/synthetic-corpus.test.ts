@@ -15,7 +15,9 @@ describe("synthetic enterprise corpus", () => {
       jiraEvents: 102,
       gitEvents: 154,
       links: 200,
-      relevanceJudgments: 100,
+      // 100 issues x three families, plus 20 unanswerable cases whose
+      // truth is absence rather than a document.
+      relevanceJudgments: 320,
       aclCases: 2,
     });
   });

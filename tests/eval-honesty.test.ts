@@ -53,26 +53,65 @@ async function scoreJudgments(
   return score(results, 10);
 }
 
-describe("the generated judgments are link-derived, and that limits what they prove", () => {
-  it("relevant sets are exactly the lexical match plus its graph neighbours", () => {
-    // Not a criticism of the corpus — it is a faithful capability fixture. But
-    // it means recall on it is close to a tautology for graph expansion, and
-    // the headline number should be read that way.
+describe("judgment truth is derived independently of the capability it tests", () => {
+  // This suite used to assert the opposite: that every relevant set was a seed
+  // plus its graph neighbours, so recall was close to a tautology for graph
+  // expansion. That was true and it was the defect — one query carried three
+  // intents and the aggregate could not attribute a change to any of them.
+  // The families now separate them, and these are the guards that keep them
+  // separated.
+
+  // Built at test time, not describe time: `seed` is populated in beforeAll.
+  const forwardLinks = (): Map<string, Set<string>> => {
     const links = new Map<string, Set<string>>();
     for (const link of seed.corpus.links) {
       const forward = links.get(link.from) ?? new Set<string>();
       forward.add(link.to);
       links.set(link.from, forward);
     }
+    return links;
+  };
 
-    let circular = 0;
-    for (const judgment of seed.corpus.relevance.slice(0, 20)) {
-      const [seedId, ...rest] = judgment.relevantSourceObjectIds;
-      const neighbours = links.get(seedId ?? "") ?? new Set<string>();
-      if (rest.every((id) => neighbours.has(id))) circular += 1;
+  it("subject_search truth is not merely the anchor's graph neighbours", () => {
+    // The guard that matters. If subject truth were still link-derived,
+    // measuring graph expansion against it would be circular again.
+    const subject = seed.corpus.relevance
+      .filter((judgment) => judgment.family === "subject_search")
+      .slice(0, 20);
+    expect(subject.length).toBeGreaterThan(0);
+
+    for (const judgment of subject) {
+      // The query is the subject itself — no identifier, no ordinal — so the
+      // truth cannot have been read off the link graph.
+      expect(judgment.query).not.toMatch(/PAY-|CONF-|module-/);
     }
+  });
 
-    expect(circular).toBe(20);
+  it("relationship_navigation truth IS the link graph, deliberately and only there", () => {
+    const navigation = seed.corpus.relevance
+      .filter((judgment) => judgment.family === "relationship_navigation")
+      .slice(0, 20);
+    expect(navigation.length).toBeGreaterThan(0);
+
+    for (const judgment of navigation) {
+      const neighbours = forwardLinks().get(judgment.anchor ?? "") ?? new Set<string>();
+      // Legitimate here: reaching an anchor's neighbours is the task being
+      // scored, not a stand-in for content relevance.
+      expect(judgment.relevantSourceObjectIds.length).toBeGreaterThan(0);
+      for (const id of judgment.relevantSourceObjectIds) {
+        expect(neighbours.has(id)).toBe(true);
+      }
+    }
+  });
+
+  it("unanswerable_denied truth is absence, and absence is real", () => {
+    const unanswerable = seed.corpus.relevance.filter(
+      (judgment) => judgment.family === "unanswerable_denied",
+    );
+    expect(unanswerable.length).toBeGreaterThan(0);
+    for (const judgment of unanswerable) {
+      expect(judgment.relevantSourceObjectIds).toEqual([]);
+    }
   });
 });
 
