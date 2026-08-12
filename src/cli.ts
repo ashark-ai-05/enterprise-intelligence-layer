@@ -8,6 +8,12 @@
  */
 
 import {
+  CREDENTIAL_SOURCES,
+  credentialsEnvironment,
+  isCredentialSource,
+  openCredentialStore,
+} from "./credentials/keychain.js";
+import {
   type CheckResult,
   type DoctorReport,
   runDoctor,
@@ -32,6 +38,9 @@ const USAGE = `eil — Enterprise Intelligence Layer
 
 Usage:
   eil doctor [--json]                 Check this machine and report evidence
+  eil credentials set <source> --url <url> --principal <id> [--email <email>]
+  eil credentials list                List configured sources (never secrets)
+  eil credentials remove <source>     Remove a source profile from OS keychain
   eil scope add <source> <kind> <value...> [--schedule 1h]
   eil scope list
   eil scope remove <id> [--purge]
@@ -90,11 +99,103 @@ function flag(args: readonly string[], name: string): string | undefined {
   return index === -1 ? undefined : args[index + 1];
 }
 
+async function readSecret(): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks).toString("utf8").trim();
+  }
+  process.stderr.write("PAT/token (stored in OS keychain): ");
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  return await new Promise<string>((resolve, reject) => {
+    let value = "";
+    const finish = (): void => {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stderr.write("\n");
+      process.stdin.off("data", onData);
+      resolve(value);
+    };
+    const onData = (chunk: Buffer): void => {
+      for (const byte of chunk) {
+        if (byte === 3) {
+          process.stdin.setRawMode(false);
+          process.stdin.pause();
+          process.stderr.write("\n");
+          process.stdin.off("data", onData);
+          reject(new Error("Credential entry cancelled"));
+          return;
+        }
+        if (byte === 10 || byte === 13) {
+          finish();
+          return;
+        }
+        if (byte === 8 || byte === 127) value = value.slice(0, -1);
+        else value += String.fromCharCode(byte);
+      }
+    };
+    process.stdin.on("data", onData);
+  });
+}
+
+async function runCredentialsCommand(rest: readonly string[]): Promise<number> {
+  const [action, sourceValue] = rest;
+  const store = openCredentialStore();
+  if (action === "list") {
+    for (const source of CREDENTIAL_SOURCES) {
+      const profile = await store.get(source);
+      process.stdout.write(
+        `${source.padEnd(12)} ${profile ? `configured  ${profile.url}  principal=${profile.principal}` : "not configured"}\n`,
+      );
+    }
+    return 0;
+  }
+  if (!sourceValue || !isCredentialSource(sourceValue)) {
+    process.stderr.write(
+      "usage: eil credentials <set|remove> <confluence|jira|bitbucket>\n",
+    );
+    return 2;
+  }
+  if (action === "remove") {
+    const removed = await store.remove(sourceValue);
+    process.stdout.write(
+      `${removed ? "Removed" : "No stored credentials for"} ${sourceValue}\n`,
+    );
+    return 0;
+  }
+  if (action === "set") {
+    const url = flag(rest, "--url");
+    const principal = flag(rest, "--principal");
+    const email = flag(rest, "--email");
+    if (!url || !principal) {
+      process.stderr.write(
+        "usage: eil credentials set <source> --url <url> --principal <id> [--email <email>]\n",
+      );
+      return 2;
+    }
+    const token = await readSecret();
+    if (!token) throw new Error("PAT/token cannot be empty");
+    await store.set({
+      source: sourceValue,
+      url,
+      principal,
+      token,
+      ...(email ? { email } : {}),
+    });
+    process.stdout.write(`Stored ${sourceValue} credentials in OS keychain.\n`);
+    return 0;
+  }
+  process.stderr.write("usage: eil credentials <set|list|remove>\n");
+  return 2;
+}
+
 async function runDataCommand(
   command: string,
   rest: readonly string[],
   db: Awaited<ReturnType<typeof openDatabase>>,
   tenant: string,
+  environment: NodeJS.ProcessEnv,
 ): Promise<number> {
   if (command === "scope") {
     const [action, ...args] = rest;
@@ -176,7 +277,7 @@ async function runDataCommand(
 
     const registry = rest.includes("--fixture")
       ? new FixtureConnectorRegistry()
-      : new LiveConnectorRegistry();
+      : new LiveConnectorRegistry(environment);
 
     const outcomes = await ingestCommand(db, tenant, scopes, registry);
     let failed = 0;
@@ -250,6 +351,10 @@ async function main(argv: readonly string[]): Promise<number> {
     return report.failed > 0 ? 1 : 0;
   }
 
+  if (command === "credentials") {
+    return await runCredentialsCommand(rest);
+  }
+
   if (command === "serve") {
     await serveMcp();
     return 0;
@@ -261,7 +366,11 @@ async function main(argv: readonly string[]): Promise<number> {
     const db = await openDatabase({});
     await migrate(db);
     try {
-      return await runDataCommand(command, rest, db, tenant);
+      let environment = process.env;
+      if (process.platform === "darwin") {
+        environment = await credentialsEnvironment(openCredentialStore());
+      }
+      return await runDataCommand(command, rest, db, tenant, environment);
     } finally {
       await db.close();
     }
