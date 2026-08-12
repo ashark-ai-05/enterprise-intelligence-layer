@@ -35,6 +35,10 @@ import { AuthorizedHitResolver } from "../retrieval/authorized-resolver.js";
 import { FuzzyLexicalArm } from "../retrieval/fuzzy-arm.js";
 import { GraphExpansionArm } from "../retrieval/graph-arm.js";
 import { IndexedLexicalArm } from "../retrieval/indexed-arm.js";
+import {
+  relatedEvidence,
+  resolveExactObject,
+} from "../retrieval/object-surfaces.js";
 import { retrieve } from "../retrieval/pipeline.js";
 import type { SearchFilters } from "../retrieval/query-filters.js";
 import { SemanticArm } from "../retrieval/semantic-arm.js";
@@ -354,4 +358,36 @@ export async function searchCommand(
     limit,
     filters,
   });
+}
+
+export async function lookupObjectCommand(
+  db: Database,
+  tenantId: string,
+  id: string,
+  source?: string,
+) {
+  return resolveExactObject(
+    db,
+    tenantId,
+    await localViewer(db, tenantId),
+    id,
+    source,
+  );
+}
+
+export async function relatedEvidenceCommand(
+  db: Database,
+  tenantId: string,
+  id: string,
+  limit = 20,
+  source?: string,
+) {
+  return relatedEvidence(
+    db,
+    tenantId,
+    await localViewer(db, tenantId),
+    id,
+    limit,
+    source,
+  );
 }

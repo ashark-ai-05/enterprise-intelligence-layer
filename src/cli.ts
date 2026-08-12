@@ -28,6 +28,8 @@ import {
   embedCommand,
   ingestCommand,
   listScopesCommand,
+  lookupObjectCommand,
+  relatedEvidenceCommand,
   removeScopeCommand,
   resolveTenant,
   searchCommand,
@@ -50,6 +52,10 @@ Usage:
   eil embed                               Embed new chunks for semantic search
   eil search "<query>" [--source git,jira] [--path src/] [--limit 10] [--json]
       Quote the query to require the words adjacent, in order.
+  eil lookup <source-object-id> [--source jira] [--json]
+                                         Resolve an exact canonical id/Jira key
+  eil related <source-object-id> [--source jira] [--limit 20] [--json]
+                                         Show ACL-filtered related evidence
   eil serve                           Serve the MCP tool surface over stdio
 
 Environment:
@@ -363,6 +369,40 @@ async function runDataCommand(
     return 0;
   }
 
+  if (command === "lookup") {
+    const id = rest.find((value) => !value.startsWith("--"));
+    if (id === undefined) {
+      process.stderr.write(
+        "usage: eil lookup <source-object-id> [--source jira] [--json]\n",
+      );
+      return 2;
+    }
+    process.stdout.write(
+      `${JSON.stringify(await lookupObjectCommand(db, tenant, id, flag(rest, "--source")), null, 2)}\n`,
+    );
+    return 0;
+  }
+
+  if (command === "related") {
+    const id = rest.find((value) => !value.startsWith("--"));
+    if (id === undefined) {
+      process.stderr.write(
+        "usage: eil related <source-object-id> [--source jira] [--limit 20] [--json]\n",
+      );
+      return 2;
+    }
+    const rawLimit = flag(rest, "--limit");
+    const limit = rawLimit === undefined ? 20 : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      process.stderr.write("--limit must be an integer from 1 to 50\n");
+      return 2;
+    }
+    process.stdout.write(
+      `${JSON.stringify(await relatedEvidenceCommand(db, tenant, id, limit, flag(rest, "--source")), null, 2)}\n`,
+    );
+    return 0;
+  }
+
   return 2;
 }
 
@@ -410,6 +450,8 @@ async function main(argv: readonly string[]): Promise<number> {
     command === "scope" ||
     command === "ingest" ||
     command === "search" ||
+    command === "lookup" ||
+    command === "related" ||
     command === "embed"
   ) {
     await installGlobalProxy();
