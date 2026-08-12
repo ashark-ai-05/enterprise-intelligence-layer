@@ -72,6 +72,72 @@ const TOPICS = [
   "service ownership",
 ] as const;
 
+const SUBSYSTEMS = [
+  "checkout",
+  "ledger",
+  "gateway",
+  "onboarding",
+  "settlement",
+  "fraud-scoring",
+  "notifications",
+  "reporting",
+  "treasury",
+  "disputes",
+  "kyc",
+  "payouts",
+] as const;
+
+/**
+ * How many documents share a subject. Real estates gain subjects as they grow;
+ * this generator previously did not, so a larger corpus meant hundreds of
+ * near-identical documents per subject rather than more subjects. Every query
+ * then competed against its own topic cohort, and retrieval scores measured
+ * that collision instead of the retrieval system.
+ */
+const DOCUMENTS_PER_SUBJECT = 10;
+
+const vocabularyCache = new Map<string, readonly string[]>();
+
+/**
+ * Subjects for a corpus, sized so documents-per-subject stays roughly constant
+ * as the corpus grows. Deterministic for a given set of options.
+ */
+export function subjectVocabulary(
+  options: SyntheticCorpusOptions,
+): readonly string[] {
+  const total =
+    options.confluencePages +
+    options.jiraIssues +
+    options.repositories * options.filesPerRepository;
+  const wanted = Math.max(
+    TOPICS.length,
+    Math.ceil(total / DOCUMENTS_PER_SUBJECT),
+  );
+  const cacheKey = `${options.seed}:${wanted}`;
+  const cached = vocabularyCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const subjects: string[] = [];
+  const pairs = TOPICS.length * SUBSYSTEMS.length;
+  for (let index = 0; index < wanted; index += 1) {
+    const topic = TOPICS[index % TOPICS.length] ?? TOPICS[0];
+    const subsystem =
+      SUBSYSTEMS[Math.floor(index / TOPICS.length) % SUBSYSTEMS.length] ??
+      SUBSYSTEMS[0];
+    // Once the topic x subsystem pairs are exhausted, split by region so the
+    // vocabulary keeps growing without repeating a subject string.
+    const generation = Math.floor(index / pairs);
+    subjects.push(
+      generation === 0
+        ? `${topic} in ${subsystem}`
+        : `${topic} in ${subsystem} region-${generation}`,
+    );
+  }
+  const frozen = Object.freeze(subjects);
+  vocabularyCache.set(cacheKey, frozen);
+  return frozen;
+}
+
 function assertSize(options: SyntheticCorpusOptions): void {
   for (const [name, value] of Object.entries(options)) {
     if (name === "seed") continue;
@@ -87,7 +153,8 @@ function seededIndex(seed: string, key: string, length: number): number {
 }
 
 function topic(options: SyntheticCorpusOptions, key: string): string {
-  return TOPICS[seededIndex(options.seed, key, TOPICS.length)] ?? TOPICS[0];
+  const subjects = subjectVocabulary(options);
+  return subjects[seededIndex(options.seed, key, subjects.length)] ?? TOPICS[0];
 }
 
 function at(index: number): string {
@@ -96,8 +163,102 @@ function at(index: number): string {
   ).toISOString();
 }
 
-function page(options: SyntheticCorpusOptions, index: number): SourceItem {
-  const pageId = `CONF-${index + 1}`;
+function pageIdAt(index: number): string {
+  return `CONF-${index + 1}`;
+}
+
+function codeIdAt(options: SyntheticCorpusOptions, index: number): string {
+  const repositoryIndex = Math.floor(index / options.filesPerRepository);
+  const fileIndex = index % options.filesPerRepository;
+  return `service-${repositoryIndex}:src/module-${fileIndex}.ts`;
+}
+
+export interface LinkPlan {
+  /** issue key -> the page that documents it */
+  readonly pageFor: ReadonlyMap<string, string>;
+  /** issue key -> the code that implements it */
+  readonly codeFor: ReadonlyMap<string, string>;
+  /** page id -> the issues that reference it, for back-references */
+  readonly issuesForPage: ReadonlyMap<string, readonly string[]>;
+  /** How many issues had no same-topic page or code to link to. */
+  readonly topicFallbacks: number;
+}
+
+/**
+ * Decide which page and which file each issue links to.
+ *
+ * Previously these were `index % pageCount` and `index % fileCount`: an issue
+ * about payment retries was linked to whatever page happened to sit at that
+ * offset, so the "relevant" runbook shared no words with the incident and was
+ * reachable only by traversing the link graph. Retrieval then had nothing to
+ * find, and a miss could not be told apart from a ranking failure.
+ *
+ * Links are now drawn from documents that share the issue's topic, so relevance
+ * is a property of the content. That also makes the corpus adversarial for
+ * free: every other same-topic document becomes a genuine near-miss distractor,
+ * and picking the right one requires the explicit cross-reference rather than
+ * topic matching alone.
+ */
+export function planLinks(options: SyntheticCorpusOptions): LinkPlan {
+  const pagesByTopic = new Map<string, string[]>();
+  for (let index = 0; index < options.confluencePages; index += 1) {
+    const id = pageIdAt(index);
+    const bucket = pagesByTopic.get(topic(options, id));
+    if (bucket === undefined) pagesByTopic.set(topic(options, id), [id]);
+    else bucket.push(id);
+  }
+
+  const codeByTopic = new Map<string, string[]>();
+  const codeCount = options.repositories * options.filesPerRepository;
+  for (let index = 0; index < codeCount; index += 1) {
+    const id = codeIdAt(options, index);
+    const bucket = codeByTopic.get(topic(options, id));
+    if (bucket === undefined) codeByTopic.set(topic(options, id), [id]);
+    else bucket.push(id);
+  }
+
+  const pageFor = new Map<string, string>();
+  const codeFor = new Map<string, string>();
+  const issuesForPage = new Map<string, string[]>();
+  let topicFallbacks = 0;
+
+  for (let index = 0; index < options.jiraIssues; index += 1) {
+    const issueKey = `PAY-${index + 1}`;
+    const subject = topic(options, issueKey);
+
+    // A topic with no document of its own can happen at small sizes. Fall back
+    // to the whole set rather than dropping the link, and count it, so a corpus
+    // quietly built out of fallbacks is visible instead of silently weaker.
+    const pageBucket = pagesByTopic.get(subject);
+    const codeBucket = codeByTopic.get(subject);
+    if (pageBucket === undefined || codeBucket === undefined) topicFallbacks += 1;
+
+    const pages =
+      pageBucket ??
+      Array.from({ length: options.confluencePages }, (_, i) => pageIdAt(i));
+    const files =
+      codeBucket ?? Array.from({ length: codeCount }, (_, i) => codeIdAt(options, i));
+
+    const pageId = pages[seededIndex(options.seed, `${issueKey}:page`, pages.length)];
+    const codeId = files[seededIndex(options.seed, `${issueKey}:code`, files.length)];
+    if (pageId === undefined || codeId === undefined) continue;
+
+    pageFor.set(issueKey, pageId);
+    codeFor.set(issueKey, codeId);
+    const referencing = issuesForPage.get(pageId);
+    if (referencing === undefined) issuesForPage.set(pageId, [issueKey]);
+    else referencing.push(issueKey);
+  }
+
+  return { pageFor, codeFor, issuesForPage, topicFallbacks };
+}
+
+function page(
+  options: SyntheticCorpusOptions,
+  index: number,
+  referencingIssues: readonly string[] = [],
+): SourceItem {
+  const pageId = pageIdAt(index);
   const subject = topic(options, pageId);
   const restricted = index % 20 === 0;
   return {
@@ -120,7 +281,14 @@ function page(options: SyntheticCorpusOptions, index: number): SourceItem {
         {
           anchor: "operations",
           headingPath: ["Operations", "Recovery"],
-          text: `Runbook ${index + 1}: inspect PAY-${(index % options.jiraIssues) + 1} before recovery.`,
+          // Back-reference the issues that actually link here. Previously this
+          // named `index % jiraIssues`, which was not the inverse of the
+          // forward link, so the two references disagreed about which incident
+          // this runbook covered.
+          text:
+            referencingIssues.length > 0
+              ? `Runbook ${index + 1}: inspect ${referencingIssues.slice(0, 3).join(", ")} before recovery.`
+              : `Runbook ${index + 1}: no recorded incidents reference this page.`,
         },
       ],
     },
@@ -138,12 +306,16 @@ function page(options: SyntheticCorpusOptions, index: number): SourceItem {
   };
 }
 
-function issue(options: SyntheticCorpusOptions, index: number): SourceItem {
+function issue(
+  options: SyntheticCorpusOptions,
+  index: number,
+  plan: LinkPlan,
+): SourceItem {
   const issueKey = `PAY-${index + 1}`;
   const subject = topic(options, issueKey);
-  const pageId = `CONF-${(index % options.confluencePages) + 1}`;
-  const repo = `service-${index % options.repositories}`;
-  const path = `src/module-${index % options.filesPerRepository}.ts`;
+  const pageId = plan.pageFor.get(issueKey) ?? pageIdAt(0);
+  const codeId = plan.codeFor.get(issueKey) ?? codeIdAt(options, 0);
+  const [repo = "service-0", path = "src/module-0.ts"] = codeId.split(":");
   return {
     sourceObjectId: issueKey,
     sourceVersion: "1",
@@ -247,11 +419,12 @@ export function generateSyntheticCorpus(
   options: SyntheticCorpusOptions = syntheticCorpusPresets.ci,
 ): SyntheticCorpus {
   assertSize(options);
+  const plan = planLinks(options);
   const pages = Array.from({ length: options.confluencePages }, (_, index) =>
-    page(options, index),
+    page(options, index, plan.issuesForPage.get(pageIdAt(index)) ?? []),
   );
   const issues = Array.from({ length: options.jiraIssues }, (_, index) =>
-    issue(options, index),
+    issue(options, index, plan),
   );
   const code = Array.from(
     { length: options.repositories * options.filesPerRepository },
@@ -261,8 +434,12 @@ export function generateSyntheticCorpus(
   const relevance: SyntheticRelevanceJudgment[] = [];
   for (let index = 0; index < options.jiraIssues; index += 1) {
     const issueId = `PAY-${index + 1}`;
-    const pageId = `CONF-${(index % options.confluencePages) + 1}`;
-    const codeId = `service-${index % options.repositories}:src/module-${index % options.filesPerRepository}.ts`;
+    // Same plan the documents were generated from. These previously recomputed
+    // the modulo independently, so the graph links and the relevance labels
+    // could disagree with what the documents actually referenced.
+    const pageId = plan.pageFor.get(issueId);
+    const codeId = plan.codeFor.get(issueId);
+    if (pageId === undefined || codeId === undefined) continue;
     links.push(
       { from: issueId, to: pageId, type: "documents" },
       { from: issueId, to: codeId, type: "implemented-by" },
