@@ -80,7 +80,10 @@ export function formatReport(report: EvaluationReport): string {
   const lines = [
     `queries        ${report.queries}`,
     `recall@${report.k}      ${report.recallAtK.toFixed(3)}`,
-    `precision@${report.k}   ${report.precisionAtK.toFixed(3)}`,
+    // Printed with its ceiling because precision@k is bounded by the size of
+    // the judgment set, not just by the ranking. Without the ceiling, 0.295
+    // reads as poor precision when it is 98% of everything achievable.
+    `precision@${report.k}   ${report.precisionAtK.toFixed(3)} (ceiling ${report.maxPrecisionAtK.toFixed(3)})`,
     `MRR            ${report.mrr.toFixed(3)}`,
     `nDCG@${report.k}        ${report.ndcgAtK.toFixed(3)}`,
     `zero-result    ${report.zeroResults}`,

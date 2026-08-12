@@ -46,6 +46,26 @@ export function precisionAt(
 }
 
 /**
+ * The highest `precisionAt` this query could have scored.
+ *
+ * `precisionAt` divides by the number of results actually returned, so a query
+ * with three relevant documents that returns ten can never exceed 0.3 no matter
+ * how perfect the ranking is. Reported on its own, such a number reads as poor
+ * precision when it is really a property of the judgment set. Report it beside
+ * the metric and the metric becomes interpretable.
+ */
+export function maxPrecisionAt(
+  retrieved: readonly string[],
+  relevant: readonly string[],
+  k: number,
+): number {
+  if (k === 0) return 0;
+  const top = retrieved.slice(0, k);
+  if (top.length === 0) return 0;
+  return Math.min(new Set(relevant).size, top.length) / top.length;
+}
+
+/**
  * Reciprocal rank of the first relevant result.
  *
  * The metric that tracks "did the user have to scroll", which is usually what
@@ -88,6 +108,8 @@ export interface QueryOutcome {
   readonly relevant: readonly string[];
   readonly recall: number;
   readonly precision: number;
+  /** The best `precision` this query could have achieved. See maxPrecisionAt. */
+  readonly maxPrecision: number;
   readonly reciprocalRank: number;
   readonly ndcg: number;
   /** True when nothing came back at all — the ingestion backlog, in priority order. */
@@ -99,6 +121,12 @@ export interface EvaluationReport {
   readonly queries: number;
   readonly recallAtK: number;
   readonly precisionAtK: number;
+  /**
+   * Mean ceiling for `precisionAtK` given the judgment sets. When this sits
+   * well below 1, `precisionAtK` is bounded by the corpus rather than by the
+   * ranking, and comparing it to precision from another corpus is meaningless.
+   */
+  readonly maxPrecisionAtK: number;
   readonly mrr: number;
   readonly ndcgAtK: number;
   readonly zeroResults: number;
@@ -126,6 +154,7 @@ export function score(
       relevant,
       recall: recallAt(retrieved, relevant, k),
       precision: precisionAt(retrieved, relevant, k),
+      maxPrecision: maxPrecisionAt(retrieved, relevant, k),
       reciprocalRank: reciprocalRank(retrieved, relevant),
       ndcg: ndcgAt(retrieved, relevant, k),
       zeroResult: retrieved.length === 0,
@@ -137,6 +166,7 @@ export function score(
     queries: outcomes.length,
     recallAtK: mean(outcomes.map((outcome) => outcome.recall)),
     precisionAtK: mean(outcomes.map((outcome) => outcome.precision)),
+    maxPrecisionAtK: mean(outcomes.map((outcome) => outcome.maxPrecision)),
     mrr: mean(outcomes.map((outcome) => outcome.reciprocalRank)),
     ndcgAtK: mean(outcomes.map((outcome) => outcome.ndcg)),
     zeroResults: outcomes.filter((outcome) => outcome.zeroResult).length,

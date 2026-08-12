@@ -6,6 +6,7 @@ import {
 } from "../src/eval/harness.js";
 import {
   checkRegression,
+  maxPrecisionAt,
   ndcgAt,
   precisionAt,
   recallAt,
@@ -47,6 +48,36 @@ describe("precisionAt", () => {
 
   it("is zero when nothing was returned", () => {
     expect(precisionAt([], ["a"], 10)).toBe(0);
+  });
+});
+
+describe("maxPrecisionAt", () => {
+  it("caps at the size of the judgment set, not at 1", () => {
+    // Three relevant documents, ten returned: 0.3 is a perfect score here, and
+    // reporting 0.3 without saying so reads as failure.
+    const retrieved = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+    expect(maxPrecisionAt(retrieved, ["a", "b", "c"], 10)).toBeCloseTo(0.3);
+  });
+
+  it("is 1 when the judgment set is at least as large as the result list", () => {
+    expect(maxPrecisionAt(["a", "b"], ["a", "b", "c"], 10)).toBe(1);
+  });
+
+  it("does not let duplicate judgments inflate the ceiling above 1", () => {
+    expect(maxPrecisionAt(["a"], ["a", "a", "a"], 10)).toBe(1);
+  });
+
+  it("is zero when nothing was returned", () => {
+    expect(maxPrecisionAt([], ["a"], 10)).toBe(0);
+  });
+
+  it("bounds the precision actually scored, on a perfect ranking", () => {
+    // The guard that matters: a flawless ranking must not exceed the ceiling.
+    const retrieved = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+    const relevant = ["a", "b", "c"];
+    expect(precisionAt(retrieved, relevant, 10)).toBe(
+      maxPrecisionAt(retrieved, relevant, 10),
+    );
   });
 });
 
@@ -244,5 +275,27 @@ describe("evaluate", () => {
       viewer,
     );
     expect(formatReport(report)).toMatch(/found nothing:\n {2}zzzznothing/);
+  });
+
+  it("never prints precision without the ceiling that bounds it", () => {
+    // The regression this exists to prevent: precision@10 of 0.295 was reported
+    // bare while its ceiling was 0.300, so it read as a quality problem when it
+    // was a property of the judgment set.
+    const report = score(
+      [
+        {
+          query: "q",
+          retrieved: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"],
+          relevant: ["a", "b", "c"],
+        },
+      ],
+      10,
+    );
+
+    expect(report.precisionAtK).toBeCloseTo(0.3);
+    expect(report.maxPrecisionAtK).toBeCloseTo(0.3);
+    expect(formatReport(report)).toMatch(
+      /precision@10 {3}0\.300 \(ceiling 0\.300\)/,
+    );
   });
 });
