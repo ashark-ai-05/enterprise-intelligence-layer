@@ -7,6 +7,10 @@ import {
   seedEvaluationCorpus,
   toBaseline,
 } from "../src/eval/corpus-gate.js";
+import {
+  subjectMembers,
+  syntheticCorpusPresets,
+} from "../src/corpus/synthetic.js";
 import { deriveIndependentJudgments } from "../src/eval/independent-judgments.js";
 import { score } from "../src/eval/metrics.js";
 import { IndexedLexicalArm } from "../src/retrieval/indexed-arm.js";
@@ -72,18 +76,42 @@ describe("judgment truth is derived independently of the capability it tests", (
     return links;
   };
 
-  it("subject_search truth is not merely the anchor's graph neighbours", () => {
-    // The guard that matters. If subject truth were still link-derived,
-    // measuring graph expansion against it would be circular again.
+  it("subject_search truth is independent of planLinks, not merely of the query", () => {
+    // The earlier version of this guard only checked the query carried no
+    // identifier, which does not establish anything about the truth. The truth
+    // was in fact [issue, pageFor(issue), codeFor(issue)] -- selected by the
+    // same planLinks() that builds the graph edges, so it stayed circular.
+    //
+    // This asserts the real property: subject truth equals subjectMembers(),
+    // which consults only each object's own key, and therefore cannot change
+    // when link planning changes.
     const subject = seed.corpus.relevance
       .filter((judgment) => judgment.family === "subject_search")
       .slice(0, 20);
     expect(subject.length).toBeGreaterThan(0);
 
     for (const judgment of subject) {
-      // The query is the subject itself — no identifier, no ordinal — so the
-      // truth cannot have been read off the link graph.
       expect(judgment.query).not.toMatch(/PAY-|CONF-|module-/);
+      expect([...judgment.relevantSourceObjectIds].sort()).toEqual(
+        [...subjectMembers(syntheticCorpusPresets.ci, judgment.query)].sort(),
+      );
+    }
+  });
+
+  it("denied truth names a forbidden object, not an empty answer", () => {
+    const denied = seed.corpus.relevance.filter(
+      (judgment) => judgment.family === "denied",
+    );
+    expect(denied.length).toBeGreaterThan(0);
+    for (const judgment of denied) {
+      // An answer exists; it is simply not this viewer's. Leakage is the
+      // metric, so a forbidden object must be named and authorized
+      // alternatives must remain available.
+      expect(judgment.forbidden?.length ?? 0).toBeGreaterThan(0);
+      expect(judgment.relevantSourceObjectIds.length).toBeGreaterThan(0);
+      for (const id of judgment.forbidden ?? []) {
+        expect(judgment.relevantSourceObjectIds).not.toContain(id);
+      }
     }
   });
 
@@ -104,9 +132,9 @@ describe("judgment truth is derived independently of the capability it tests", (
     }
   });
 
-  it("unanswerable_denied truth is absence, and absence is real", () => {
+  it("unanswerable truth is absence, and absence is real", () => {
     const unanswerable = seed.corpus.relevance.filter(
-      (judgment) => judgment.family === "unanswerable_denied",
+      (judgment) => judgment.family === "unanswerable",
     );
     expect(unanswerable.length).toBeGreaterThan(0);
     for (const judgment of unanswerable) {

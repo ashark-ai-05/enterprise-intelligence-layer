@@ -38,8 +38,10 @@ export type QueryFamily =
   | "subject_search"
   /** From an anchor, reach its neighbours. Graph truth is legitimate *here*. */
   | "relationship_navigation"
-  /** No answer exists, or the viewer may not see it. Truth is absence. */
-  | "unanswerable_denied";
+  /** No document answers it. Truth is absence; the metric is abstention. */
+  | "unanswerable"
+  /** An answer exists but the viewer may not see it. The metric is leakage. */
+  | "denied";
 
 export interface SyntheticRelevanceJudgment {
   query: string;
@@ -48,6 +50,12 @@ export interface SyntheticRelevanceJudgment {
   family?: QueryFamily;
   /** For relationship_navigation: the object the traversal starts from. */
   anchor?: string;
+  /**
+   * For `denied`: objects that must never appear for this viewer. Distinct from
+   * an empty relevant set — an answer does exist here, it is simply not this
+   * viewer's to see, so the metric is leakage rather than abstention.
+   */
+  forbidden?: string[];
 }
 
 export interface SyntheticAclCase {
@@ -197,6 +205,42 @@ function codeIdAt(options: SyntheticCorpusOptions, index: number): string {
   const repositoryIndex = Math.floor(index / options.filesPerRepository);
   const fileIndex = index % options.filesPerRepository;
   return `service-${repositoryIndex}:src/module-${fileIndex}.ts`;
+}
+
+const memberCache = new Map<string, ReadonlyMap<string, string[]>>();
+
+/**
+ * Every document assigned a given subject.
+ *
+ * Deliberately derived only from each object's own identity — the same
+ * `seededIndex(seed, key)` the generator uses when building the document — and
+ * never from `planLinks()`. That independence is the whole point: if subject
+ * truth were selected by the same code that creates the graph edges, scoring
+ * graph expansion against it would be circular, which is the defect the family
+ * split exists to remove.
+ */
+export function subjectMembers(
+  options: SyntheticCorpusOptions,
+  subject: string,
+): string[] {
+  const cacheKey = `${options.seed}:${options.confluencePages}:${options.jiraIssues}:${options.repositories}:${options.filesPerRepository}`;
+  let index = memberCache.get(cacheKey);
+  if (index === undefined) {
+    const built = new Map<string, string[]>();
+    const add = (id: string): void => {
+      const key = topic(options, id);
+      const bucket = built.get(key);
+      if (bucket === undefined) built.set(key, [id]);
+      else bucket.push(id);
+    };
+    for (let i = 0; i < options.confluencePages; i += 1) add(pageIdAt(i));
+    for (let i = 0; i < options.jiraIssues; i += 1) add(`PAY-${i + 1}`);
+    for (let i = 0; i < options.repositories * options.filesPerRepository; i += 1)
+      add(codeIdAt(options, i));
+    index = built;
+    memberCache.set(cacheKey, built);
+  }
+  return [...(index.get(subject) ?? [])];
 }
 
 export interface LinkPlan {
@@ -483,13 +527,19 @@ export function generateSyntheticCorpus(
       relevantSourceObjectIds: [issueId],
     });
 
-    // subject_search — content only, no identifier and no ordinal. Truth is the
-    // set of documents independently assigned this subject by seededIndex,
-    // which is computed per object from its own key and never from the links.
+    // subject_search — content only, no identifier and no ordinal.
+    //
+    // Truth is *every* document assigned this subject, computed from each
+    // object's own key via seededIndex. It was previously the trio
+    // [issue, pageFor(issue), codeFor(issue)] — but planLinks() chooses those
+    // two from the same-subject cohort and also creates the graph edges, so the
+    // truth was link-selected after all and measuring graph expansion against
+    // it stayed circular. Subject membership is now independent of planLinks by
+    // construction; `subjectMembers` never consults it.
     relevance.push({
       family: "subject_search",
       query: subject,
-      relevantSourceObjectIds: [issueId, pageId, codeId],
+      relevantSourceObjectIds: subjectMembers(options, subject),
     });
 
     // relationship_navigation — given the issue, reach its neighbours. Graph
@@ -503,7 +553,7 @@ export function generateSyntheticCorpus(
     });
   }
 
-  // unanswerable_denied — truth is absence, so the subject must appear on *no*
+  // unanswerable — truth is absence, so the subject must appear on *no*
   // document of any kind. Checking only the issues would have been wrong: pages
   // and code are assigned subjects independently, so a subject unused by issues
   // can still be all over Confluence.
@@ -522,12 +572,32 @@ export function generateSyntheticCorpus(
       const missing = `${subject} in ${subsystem} region-${unansweredRegion}`;
       if (vocabulary.has(missing)) continue;
       relevance.push({
-        family: "unanswerable_denied",
+        family: "unanswerable",
         query: `${missing} rollback procedure`,
         relevantSourceObjectIds: [],
       });
       unanswered += 1;
     }
+  }
+
+  // denied — an answer exists but this viewer may not see it. Every 20th page
+  // is restricted to the security group, so querying its subject as an ordinary
+  // viewer must return the same-subject alternatives and never the restricted
+  // page itself. Zero leakage is the whole metric; recall is not.
+  let denied = 0;
+  for (let index = 0; index < options.confluencePages && denied < 20; index += 20) {
+    const restrictedPage = pageIdAt(index);
+    const subject = topic(options, restrictedPage);
+    const authorized = subjectMembers(options, subject).filter(
+      (id) => id !== restrictedPage,
+    );
+    relevance.push({
+      family: "denied",
+      query: subject,
+      relevantSourceObjectIds: authorized,
+      forbidden: [restrictedPage],
+    });
+    denied += 1;
   }
   return {
     seed: options.seed,
