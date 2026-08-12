@@ -245,8 +245,33 @@ node dist/cli.js search "handleRetry" --limit 20
 node dist/cli.js scope remove <scope-id> [--purge]
 ```
 
-**`ingest` currently refuses rather than pretending.** No live source connector
-is implemented yet, so against a real Confluence space it fails with:
+### Git works live today
+
+Git needs no API, no credentials and no proxy — only the `git` binary and a
+checkout that already exists. It is the one live source that cannot be blocked
+by an unresolved networking or auth question:
+
+```bash
+node dist/cli.js scope add git repositories /path/to/repo /path/to/other-repo
+node dist/cli.js ingest
+node dist/cli.js search "handlePaymentRetry"
+```
+
+Delta is exact, because the git blob SHA *is* a content hash:
+
+```
+first run       {"discovered":2,"created":2, ...}
+no changes      {"discovered":2,"unchanged":2, ...}      # zero writes
+after a commit  {"discovered":2,"contentUpdated":1, ...} # only what changed
+```
+
+`node_modules`, `vendor`, `dist`, minified bundles, lockfiles and binaries are
+excluded by policy, not by remembering to.
+
+### Confluence and Jira refuse rather than pretend
+
+No live HTTP connector is implemented yet, so against a real Confluence space
+`ingest` fails with:
 
 ```
 No live confluence connector is implemented yet — this build is fixture-backed.

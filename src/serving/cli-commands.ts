@@ -12,6 +12,7 @@
  * would only discover it when search returned documents that do not exist.
  */
 
+import { LocalGitConnector } from "../connectors/git-local.js";
 import {
   StubConfluenceConnector,
   StubFilesConnector,
@@ -25,6 +26,7 @@ import {
   runNextScopeJob,
 } from "../jobs/scope-worker.js";
 import { DatabaseLinkSource } from "../links/store.js";
+import { publishCoreGeneration } from "../publication/generations.js";
 import { AuthorizedHitResolver } from "../retrieval/authorized-resolver.js";
 import { GraphExpansionArm } from "../retrieval/graph-arm.js";
 import { IndexedLexicalArm } from "../retrieval/indexed-arm.js";
@@ -32,6 +34,11 @@ import { retrieve } from "../retrieval/pipeline.js";
 import type { RetrievalArm, Viewer } from "../retrieval/types.js";
 import { createScope, listScopes, removeScope } from "../scopes/service.js";
 import type { IngestionScope, Source } from "../scopes/types.js";
+import {
+  assignResourceContainer,
+  ensureContainer,
+  replaceContainerAces,
+} from "../security/acl.js";
 import type { Database } from "../storage/database.js";
 
 /** Tenant for local operator use. One person, one database, one tenant. */
@@ -133,6 +140,9 @@ export async function removeScopeCommand(
  */
 export class LiveConnectorRegistry implements ConnectorRegistry {
   resolve(scope: IngestionScope): SourceConnector {
+    // Git needs no API, credentials or proxy — only a checkout that already
+    // exists — so it is live today while the HTTP sources wait on those facts.
+    if (scope.source === "git") return new LocalGitConnector();
     throw new Error(
       `No live ${scope.source} connector is implemented yet — this build is fixture-backed.\n  • see the whole pipeline end to end:  pnpm demo\n  • ingest deterministic fixtures:      eil ingest --fixture\nLive connectors are gated on the corporate environment facts from 'node scripts/probe.mjs'.`,
     );
@@ -158,10 +168,61 @@ export class FixtureConnectorRegistry implements ConnectorRegistry {
   }
 }
 
+/** The principal local single-user mode grants. */
+export const LOCAL_PRINCIPAL = {
+  domain: "local",
+  principalId: "owner",
+} as const;
+
+/**
+ * Make what was just ingested actually findable.
+ *
+ * Ingestion alone stores resources with no container, no ACEs and no published
+ * generation — and retrieval fails closed on all three, so `ingest` followed by
+ * `search` returns nothing at all. Correct, and useless.
+ *
+ * In local single-user mode the answer is simple and honest: one container per
+ * source, granted to the person running the command, published. A shared
+ * deployment must mirror the source's own permissions instead, which is why
+ * this lives in the local CLI rather than in the ingestion pipeline.
+ */
+export async function publishLocally(
+  db: Database,
+  tenantId: string,
+  source: Source,
+): Promise<{ containerId: string; published: number }> {
+  const containerId = await ensureContainer(
+    db,
+    tenantId,
+    source,
+    `local-${source}`,
+    `Local ${source}`,
+  );
+  await replaceContainerAces(db, tenantId, containerId, [
+    { ...LOCAL_PRINCIPAL, effect: "allow" },
+  ]);
+
+  const resources = await db.query<{ id: string }>(
+    `SELECT id FROM resources
+      WHERE tenant_id = $1 AND source = $2 AND deleted_at IS NULL`,
+    [tenantId, source],
+  );
+
+  let published = 0;
+  for (const { id } of resources.rows) {
+    await assignResourceContainer(db, tenantId, id, containerId);
+    await publishCoreGeneration(db, tenantId, id);
+    published += 1;
+  }
+
+  return { containerId, published };
+}
+
 export interface IngestOutcome {
   readonly scopeId: string;
   readonly status: string;
   readonly ingestion?: Record<string, number> | undefined;
+  readonly published?: number | undefined;
   readonly error?: string | undefined;
 }
 
@@ -189,10 +250,18 @@ export async function ingestCommand(
       `cli-${now()}`,
       connectors,
     );
+    // Publish only what succeeded. Publishing after a failed sync would make a
+    // partially-ingested scope searchable, which is worse than not searchable.
+    const published =
+      result?.status === "completed"
+        ? (await publishLocally(db, tenantId, scope.source)).published
+        : undefined;
+
     outcomes.push({
       scopeId: scope.id,
       status: result?.status ?? "no-job",
       ingestion: result?.ingestion as Record<string, number> | undefined,
+      published,
       error: result?.error,
     });
   }
