@@ -15,7 +15,10 @@ describe("synthetic enterprise corpus", () => {
       jiraEvents: 102,
       gitEvents: 154,
       links: 200,
-      relevanceJudgments: 100,
+      // Per unique subject: 31 subject_search. Per issue: 100 exact_lookup and
+      // 100 relationship_navigation. Plus 20 unanswerable and 3 denied — the ci
+      // preset has 60 pages with every 20th restricted.
+      relevanceJudgments: 254,
       aclCases: 2,
     });
   });
