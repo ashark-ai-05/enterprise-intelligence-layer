@@ -110,6 +110,9 @@ export async function retrieve(
             name: arm.name,
             hits: hits.slice(0, perArmLimit),
             weight: weightFor(classification, arm.name),
+            // Graph expansion reaches documents by relationship, not by
+            // matching the query, so it corroborates rather than nominates.
+            supporting: arm.name === "graph-expand",
           };
         } catch (error) {
           // One arm failing must narrow the result, never fail the query.

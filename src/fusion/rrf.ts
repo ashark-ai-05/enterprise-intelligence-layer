@@ -33,6 +33,22 @@ export interface Arm<T extends ArmHit = ArmHit> {
    * arm. Defaults to 1.
    */
   readonly weight?: number;
+  /**
+   * A *corroborating* arm: it strengthens candidates that some other arm also
+   * found, but cannot introduce a candidate ahead of directly-matched ones.
+   *
+   * Graph expansion is the case this exists for. It reaches documents by
+   * relationship rather than by matching the query, so a neighbour of a
+   * high-ranked *wrong* seed arrives at rank 1 with nothing to say about the
+   * query. Weighting cannot separate those two situations: any weight large
+   * enough to surface a useful neighbour is large enough to surface a useless
+   * one, because RRF sees only rank. Measured on the corrected corpus, no
+   * scalar weight satisfied both "raises recall" and "does not displace" —
+   * the arm either contributed and displaced, or contributed nothing.
+   *
+   * Defaults to false.
+   */
+  readonly supporting?: boolean;
 }
 
 export interface FusedHit<T extends ArmHit = ArmHit> {
@@ -79,6 +95,8 @@ export function rrf<T extends ArmHit>(
   interface Accumulator {
     score: number;
     hit: T;
+    /** True once any non-supporting arm has contributed. */
+    directlyMatched: boolean;
     firstArmIndex: number;
     contributions: {
       arm: string;
@@ -91,6 +109,7 @@ export function rrf<T extends ArmHit>(
 
   arms.forEach((arm, armIndex) => {
     const weight = arm.weight ?? 1;
+    const supporting = arm.supporting ?? false;
     const hits =
       options.perArmLimit === undefined
         ? arm.hits
@@ -112,10 +131,16 @@ export function rrf<T extends ArmHit>(
         byId.set(hit.id, {
           score: contribution,
           hit,
+          directlyMatched: !supporting,
           firstArmIndex: armIndex,
           contributions: [{ arm: arm.name, rank, weight, score: contribution }],
         });
       } else {
+        // A supporting arm still adds its score — a candidate found both
+        // directly and by relationship is corroborated and may legitimately
+        // rise past other directly-matched results. What it may not do is
+        // arrive on relationship alone and outrank them.
+        if (!supporting) existing.directlyMatched = true;
         existing.score += contribution;
         existing.contributions.push({
           arm: arm.name,
@@ -130,6 +155,11 @@ export function rrf<T extends ArmHit>(
   return [...byId.entries()]
     .map(([id, acc]) => ({ id, acc }))
     .sort((a, b) => {
+      // Directly-matched candidates rank ahead of relationship-only ones,
+      // whatever the fused scores say. Within each partition the ordering is
+      // exactly as before, so corroboration still moves results.
+      if (a.acc.directlyMatched !== b.acc.directlyMatched)
+        return a.acc.directlyMatched ? -1 : 1;
       if (b.acc.score !== a.acc.score) return b.acc.score - a.acc.score;
       if (a.acc.firstArmIndex !== b.acc.firstArmIndex)
         return a.acc.firstArmIndex - b.acc.firstArmIndex;
