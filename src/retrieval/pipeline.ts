@@ -13,6 +13,7 @@
 
 import { type Arm, applyDiversityCap, rrf } from "../fusion/rrf.js";
 import { classify, weightFor } from "./classify.js";
+import { type SearchFilters, matchesFilters } from "./query-filters.js";
 import type {
   RetrievalArm,
   RetrievalHit,
@@ -23,6 +24,8 @@ import type {
 } from "./types.js";
 
 export interface PipelineOptions {
+  /** Narrow results by source or id substring. Applied after the ACL gate. */
+  readonly filters?: SearchFilters;
   /** Results per arm before fusion. */
   readonly perArmLimit?: number;
   /** Final result count. */
@@ -150,7 +153,14 @@ export async function retrieve(
   const aclDrift = rejected.filter((item) => item.hit.syncedAt === null).length;
   const aclRejected = rejected.length - aclDrift;
 
-  const capped = applyDiversityCap(permitted, {
+  const filtered =
+    options.filters === undefined
+      ? permitted
+      : permitted.filter((item) =>
+          matchesFilters(item.hit, options.filters as SearchFilters),
+        );
+
+  const capped = applyDiversityCap(filtered, {
     maxPerSource,
     maxPerContainer,
     limit,

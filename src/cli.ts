@@ -19,6 +19,7 @@ import {
   runDoctor,
 } from "./doctor/checks.js";
 import { installGlobalProxy } from "./net/proxy.js";
+import { parseSearchFlags } from "./retrieval/query-filters.js";
 import type { Source } from "./scopes/types.js";
 import {
   FixtureConnectorRegistry,
@@ -47,7 +48,8 @@ Usage:
   eil scope remove <id> [--purge]
   eil ingest [--scope <id>] [--fixture]   Sync scopes through the durable queue
   eil embed                               Embed new chunks for semantic search
-  eil search "<query>" [--limit 10]       Search what has been ingested
+  eil search "<query>" [--source git,jira] [--path src/] [--limit 10] [--json]
+      Quote the query to require the words adjacent, in order.
   eil serve                           Serve the MCP tool surface over stdio
 
 Environment:
@@ -309,19 +311,53 @@ async function runDataCommand(
   if (command === "search") {
     const query = rest.find((value) => !value.startsWith("--"));
     if (query === undefined) {
-      process.stderr.write('usage: eil search "<query>" [--limit 10]\n');
+      process.stderr.write(
+        'usage: eil search "<query>" [--source git,jira] [--path src/] [--limit 10] [--json]\n',
+      );
       return 2;
     }
-    const limit = Number(flag(rest, "--limit") ?? 10);
-    const result = await searchCommand(db, tenant, query, limit);
+
+    const { limit, json, ...filters } = parseSearchFlags(rest);
+    const result = await searchCommand(db, tenant, query, limit, filters);
+
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ query, ...result }, null, 2)}\n`,
+      );
+      return 0;
+    }
 
     if (result.hits.length === 0) {
       process.stdout.write("No results.\n");
+      // Say what would widen the search, rather than leaving a dead end.
+      const semanticSkipped = result.armsSkipped.some(
+        (arm) => arm.arm === "semantic",
+      );
+      if (semanticSkipped) {
+        process.stdout.write(
+          "Semantic search is off because nothing is embedded yet — run: eil embed\n",
+        );
+      }
+      if (filters.sources !== undefined || filters.path !== undefined) {
+        process.stdout.write(
+          "Filters are active; try again without --source/--path.\n",
+        );
+      }
       return 0;
     }
+
     for (const hit of result.hits) {
+      const arms = hit.arms.map((arm) => arm.arm).join(", ");
+      process.stdout.write(`${hit.source.padEnd(11)} ${hit.title}\n`);
+      process.stdout.write(`  ${hit.url}\n`);
+      if (hit.snippet !== undefined && hit.snippet !== "") {
+        process.stdout.write(
+          `  ${hit.snippet.replace(/\s+/g, " ").slice(0, 160).trim()}\n`,
+        );
+      }
+      // Why it matched: which arms contributed, and whether it is live.
       process.stdout.write(
-        `${hit.source.padEnd(11)} ${hit.id}\n  ${hit.title}\n  ${hit.url}\n`,
+        `  matched by: ${arms}${hit.syncedAt === null ? " (live)" : ""}\n\n`,
       );
     }
     return 0;
