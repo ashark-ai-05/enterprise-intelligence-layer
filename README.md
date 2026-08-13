@@ -374,9 +374,33 @@ not commit connection strings.
 - deterministic synthetic corpora, ACL adversarial cases, and CI regression gates
 - MCP search/evidence/freshness tools with permission re-checks
 
+### Reading the retrieval numbers
+
 Search metrics printed by the demo validate deterministic fixture capabilities;
 they are not claims about production relevance. Real relevance evaluation must
 use representative corporate queries and independently judged evidence.
+
+They are also **scored per capability, never pooled**. A single number could not
+adjudicate the three different intents it was averaging — an exact identifier
+lookup, a subject search and a graph traversal, all scored against one flat
+relevant list — so it moved for reasons nobody could attribute:
+
+| family | what it measures | current state |
+|---|---|---|
+| `exact_lookup` | resolving `PAY-1` through *search* | **0.000, and asserted to be** — identifiers are structurally absent from the full-text index. Use `lookup_object` |
+| `subject_search` | content relevance, no identifiers | the production baseline |
+| `relationship_navigation` | reaching an anchor's neighbours | full coverage, zero leakage |
+| `unanswerable` | declining when nothing answers | **retrieval never declines** — it returns candidates for every such query |
+| `denied` | refusing what the viewer may not see | zero leakage in every configuration tested |
+
+Two of those are recorded failures, deliberately. A known-absent capability
+asserted as passing is worse than no test, so `exact_lookup` asserts `0.000` and
+`unanswerable` asserts that retrieval answers everything. Both break loudly if
+the behaviour changes — which is the point.
+
+`pnpm demo` prints the `ci` preset; `pnpm demo:stress` prints `stress`, and says
+which corpus it scored. **Do not compare the two**: only a `ci` run is comparable
+to the committed baseline.
 
 ## Documentation
 
