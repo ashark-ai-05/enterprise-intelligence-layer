@@ -100,7 +100,7 @@ args:    /absolute/path/to/enterprise-intelligence-layer/dist/cli.js serve
 ### Live enterprise ingestion status
 
 Git, Confluence, and Jira have live connectors; Bitbucket and files are still
-fixture-backed. The source URL variables used by `pnpm doctor` only test
+fixture-backed. The source URL variables used by `pnpm run doctor` only test
 connectivity, not ingestion — the credentials the connectors themselves need
 are documented in [Choose what to index, index it, search it](#choose-what-to-index-index-it-search-it)
 below.
@@ -133,7 +133,7 @@ EIL_MAAS_URL="https://models.example.corp" \
   node scripts/probe.mjs
 ```
 
-It reports the same facts as `pnpm doctor` — runtime, proxy, TLS bundle, source
+It reports the same facts as `pnpm run doctor` — runtime, proxy, TLS bundle, source
 reachability, whether the model endpoint serves embeddings — treats a skip as an
 unknown rather than a pass, and exits non-zero on failure.
 
@@ -170,8 +170,14 @@ Install and run the environment checks:
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm doctor
+pnpm run doctor
 ```
+
+`pnpm run doctor`, not `pnpm doctor`. `doctor` is also a built-in pnpm
+subcommand, and the built-in wins: `pnpm doctor` runs pnpm's own check, prints
+nothing, and exits 0. On a corporate machine that reads as "the diagnostic
+passed" when in fact it never ran — losing the proxy, TLS-bundle and native
+binary findings that are the whole reason to run it first.
 
 If pnpm reports `Failed to load npm builtin configs`, capture the complete
 error and the safe version/config outputs above. The failure happens before
@@ -181,7 +187,7 @@ same version through Corepack only if Corepack is already approved and cached:
 
 ```bash
 corepack pnpm --version
-corepack pnpm doctor
+corepack pnpm run doctor
 ```
 
 Corepack may otherwise need network access and a writable cache, so it is a
@@ -202,7 +208,7 @@ EIL_CONFLUENCE_URL="https://confluence.example.corp" \
 EIL_JIRA_URL="https://jira.example.corp" \
 EIL_BITBUCKET_URL="https://bitbucket.example.corp" \
 EIL_MAAS_URL="https://models.example.corp" \
-pnpm doctor
+pnpm run doctor
 ```
 
 For an intercepting corporate proxy, configure the standard proxy variables
@@ -212,7 +218,7 @@ and the approved CA bundle. Never commit these values:
 HTTPS_PROXY="http://proxy.example.corp:8080" \
 NO_PROXY="localhost,127.0.0.1,.example.corp" \
 NODE_EXTRA_CA_CERTS="/approved/path/corporate-ca.pem" \
-pnpm doctor
+pnpm run doctor
 ```
 
 The doctor reports skipped checks as unknown, not passed. Share its output only
