@@ -27,6 +27,7 @@ import {
   relatedEvidence,
   resolveExactObject,
 } from "../src/retrieval/object-surfaces.js";
+import { callTool } from "../src/serving/tools.js";
 import type { Database } from "../src/storage/database.js";
 import { testDatabase } from "./helpers/database.js";
 
@@ -64,8 +65,12 @@ describe("exact_lookup — a confirmed absent capability", () => {
     // which is the correct shape. So this measures what it always measured:
     // search does not resolve identifiers, and is not expected to.
     //
-    // It should fail if someone makes search do this by indexing titles, which
-    // would be the wrong fix.
+    // This is a characterisation, not a wish. If it fails because search
+    // legitimately learned to resolve identifiers -- structured metadata
+    // matching, say -- that is an improvement: re-record it deliberately. What
+    // it must not become is a silent 0 nobody notices, or a licence to make
+    // search do this by dumping titles into the full-text index, which is the
+    // wrong fix for the reason above.
     expect(report.recallAtK).toBe(0);
     expect(report.queries).toBe(20);
   }, 600_000);
@@ -141,16 +146,31 @@ describe("denied — the boundary that holds", () => {
 });
 
 describe("exact-object surface — the capability search does not provide", () => {
-  it("resolves a canonical id that search cannot find", async () => {
-    // The other half of the exact_lookup story. `search_enterprise` scores
-    // 0.000 on identifiers by design; this is the path that does resolve them,
-    // and this pairing is what stops the 0.000 above being read as "the product
-    // cannot do this".
-    const viewer = evalViewer(seed.containerIds);
-    const resolved = await resolveExactObject(db, EVAL_TENANT, viewer, "PAY-1");
+  // Driven through `callTool`, the surface an agent actually reaches, rather
+  // than the module behind it. Testing the module directly would pass even if
+  // the tool were unregistered, mis-named or wired to the wrong arguments --
+  // which is most of what could break between an agent and this capability.
+  const context = (viewer: ReturnType<typeof evalViewer>) => ({
+    db,
+    tenantId: EVAL_TENANT,
+    arms: [],
+    viewer,
+    audit: { record: async () => {} },
+  });
 
-    expect(resolved.found).toBe(true);
-    expect(resolved.hit?.id).toBe("PAY-1");
+  it("resolves a canonical id that search cannot find", async () => {
+    // The other half of the exact_lookup story: search scores 0.000 on
+    // identifiers, and this is the path that resolves them. The pairing is what
+    // stops that 0.000 being read as "the product cannot do this".
+    const result = await callTool(
+      "lookup_object",
+      { id: "PAY-1" },
+      context(evalViewer(seed.containerIds)),
+    );
+    const payload = JSON.parse(result.content);
+
+    expect(payload.found).toBe(true);
+    expect(payload.hit?.id ?? payload.id).toBe("PAY-1");
   }, 600_000);
 
   it("refuses to a viewer without access an object it returns to one with it", async () => {
@@ -182,8 +202,15 @@ describe("exact-object surface — the capability search does not provide", () =
   }, 600_000);
 
   it("returns an anchor's related evidence, and never a protected neighbour", async () => {
-    const viewer = evalViewer(seed.containerIds);
-    const related = await relatedEvidence(db, EVAL_TENANT, viewer, "PAY-1");
+    const related = JSON.parse(
+      (
+        await callTool(
+          "related_evidence",
+          { id: "PAY-1" },
+          context(evalViewer(seed.containerIds)),
+        )
+      ).content,
+    );
 
     expect(related.found).toBe(true);
     expect(related.evidence.length).toBeGreaterThan(0);
