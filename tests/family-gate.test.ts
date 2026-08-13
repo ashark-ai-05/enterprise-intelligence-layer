@@ -23,10 +23,6 @@ import {
   runNavigationEvaluation,
   seedEvaluationCorpus,
 } from "../src/eval/corpus-gate.js";
-import {
-  relatedEvidence,
-  resolveExactObject,
-} from "../src/retrieval/object-surfaces.js";
 import { callTool } from "../src/serving/tools.js";
 import type { Database } from "../src/storage/database.js";
 import { testDatabase } from "./helpers/database.js";
@@ -63,7 +59,7 @@ describe("exact_lookup — a confirmed absent capability", () => {
     // not fire when it landed -- because it was built as a separate
     // identity-level surface rather than by pushing titles into the index,
     // which is the correct shape. So this measures what it always measured:
-    // search does not resolve identifiers, and is not expected to.
+    // search does not currently resolve identifiers.
     //
     // This is a characterisation, not a wish. If it fails because search
     // legitimately learned to resolve identifiers -- structured metadata
@@ -188,15 +184,16 @@ describe("exact-object surface — the capability search does not provide", () =
       containers: seed.containerIds,
     };
 
-    const visible = await resolveExactObject(
-      db,
-      EVAL_TENANT,
-      authorized,
-      "PAY-1",
+    const visible = JSON.parse(
+      (await callTool("lookup_object", { id: "PAY-1" }, context(authorized)))
+        .content,
     );
     expect(visible.found).toBe(true);
 
-    const denied = await resolveExactObject(db, EVAL_TENANT, blind, "PAY-1");
+    const denied = JSON.parse(
+      (await callTool("lookup_object", { id: "PAY-1" }, context(blind)))
+        .content,
+    );
     expect(denied.found).toBe(false);
     expect(denied.hit).toBeUndefined();
   }, 600_000);
